@@ -21,6 +21,10 @@
       "destination": "/api/oauth"
     },
     {
+      "source": "/tools/call",
+      "destination": "/api/fastmcp"
+    },
+    {
       "source": "/api/auth/(.*)",
       "destination": "/api/auth"
     },
