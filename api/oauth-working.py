@@ -110,16 +110,27 @@ class handler(BaseHTTPRequestHandler):
 
         # OAuth registration endpoint
         if "register" in path:
+            # Get base URL for dynamic redirect URIs
+            base_url = os.getenv("BASE_URL")
+            if not base_url:
+                host = self.headers.get('Host')
+                if host:
+                    protocol = 'http' if 'localhost' in host or '127.0.0.1' in host else 'https'
+                    base_url = f"{protocol}://{host}"
+                else:
+                    base_url = "https://your-mcp-server.vercel.app"
+
             # Generate new client credentials
             client_id, client_secret = generate_client_credentials()
 
-            # Store client info
+            # Store client info with dynamic redirect URIs
             oauth_clients[client_id] = {
                 "client_secret": client_secret,
                 "redirect_uris": [
                     "https://api.agent.ai/api/v3/mcp/flow/redirect",
                     "https://agent.ai/oauth/callback",
-                    "https://cesar-money-iy550m0ua-csar-e-benavides-projects.vercel.app/callback",
+                    "https://claude.ai/oauth/callback",
+                    f"{base_url}/callback",
                     "http://localhost:3000/callback",
                     "mcp://oauth/callback"
                 ],

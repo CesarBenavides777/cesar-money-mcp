@@ -83,8 +83,18 @@ class handler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
             self.end_headers()
 
-            # MCP server discovery response
-            base_url = "https://cesar-money-mcp.vercel.app"
+            # Get base URL from environment or auto-detect from request
+            base_url = os.getenv("BASE_URL")
+            if not base_url:
+                # Auto-detect from request headers (secure fallback)
+                host = self.headers.get('Host')
+                if host:
+                    # Use HTTPS in production, HTTP only for localhost
+                    protocol = 'http' if 'localhost' in host or '127.0.0.1' in host else 'https'
+                    base_url = f"{protocol}://{host}"
+                else:
+                    # Final fallback
+                    base_url = "https://your-mcp-server.vercel.app"
 
             discovery_response = {
                 "name": "Monarch Money MCP Server",
