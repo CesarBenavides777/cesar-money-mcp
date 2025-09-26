@@ -7,6 +7,7 @@ import json
 import os
 import secrets
 import logging
+from datetime import datetime
 from typing import Dict, Any
 from urllib.parse import urlencode
 
@@ -27,49 +28,75 @@ def handle_client_registration(event: Dict[str, Any]) -> Dict[str, Any]:
         "Access-Control-Allow-Headers": "Content-Type, Authorization"
     }
 
-    method = event.get("httpMethod", "GET")
+    try:
+        method = event.get("httpMethod", "GET")
 
-    if method == "OPTIONS":
+        if method == "OPTIONS":
+            return {
+                "statusCode": 200,
+                "headers": headers,
+                "body": ""
+            }
+
+        # Parse request body for POST requests
+        request_data = {}
+        if method == "POST":
+            try:
+                body = event.get("body", "{}")
+                if body and isinstance(body, str):
+                    request_data = json.loads(body)
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON decode error: {e}")
+                request_data = {}
+
+        # Generate a client ID and secret
+        client_id = f"mcp_{secrets.token_urlsafe(16)}"
+        client_secret = secrets.token_urlsafe(32)
+
+        # Get redirect URIs from request or use default
+        redirect_uris = request_data.get("redirect_uris", [f"{BASE_URL}/oauth/callback"])
+        if isinstance(redirect_uris, str):
+            redirect_uris = [redirect_uris]
+
+        # OAuth client registration response (RFC 7591)
+        registration_response = {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "client_id_issued_at": int(datetime.now().timestamp()),
+            "client_secret_expires_at": 0,  # Never expires
+            "redirect_uris": redirect_uris,
+            "grant_types": ["authorization_code"],
+            "response_types": ["code"],
+            "scope": "mcp:read mcp:write",
+            "token_endpoint_auth_method": "client_secret_basic",
+            # MCP-specific metadata
+            "mcp_server_info": {
+                "name": "Monarch Money MCP",
+                "version": "1.0.0",
+                "authorization_endpoint": f"{BASE_URL}/oauth/authorize",
+                "token_endpoint": f"{BASE_URL}/oauth/token",
+                "mcp_endpoint": f"{BASE_URL}/api"
+            }
+        }
+
+        logger.info(f"OAuth client registered: {client_id}")
+
         return {
             "statusCode": 200,
             "headers": headers,
-            "body": ""
+            "body": json.dumps(registration_response)
         }
 
-    # Parse request body for POST requests
-    request_data = {}
-    if method == "POST":
-        try:
-            body = event.get("body", "{}")
-            if isinstance(body, str):
-                request_data = json.loads(body) if body else {}
-        except json.JSONDecodeError:
-            pass
-
-    # Generate a client ID and secret
-    client_id = f"mcp_{secrets.token_urlsafe(16)}"
-    client_secret = secrets.token_urlsafe(32)
-
-    # OAuth client registration response
-    registration_response = {
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "client_id_issued_at": 1640995200,  # Unix timestamp
-        "client_secret_expires_at": 0,  # Never expires
-        "authorization_endpoint": f"{BASE_URL}/oauth/authorize",
-        "token_endpoint": f"{BASE_URL}/oauth/token",
-        "grant_types": ["authorization_code"],
-        "response_types": ["code"],
-        "redirect_uris": request_data.get("redirect_uris", [f"{BASE_URL}/oauth/callback"]),
-        "scope": "mcp:read mcp:write",
-        "token_endpoint_auth_method": "client_secret_basic"
-    }
-
-    return {
-        "statusCode": 200,
-        "headers": headers,
-        "body": json.dumps(registration_response)
-    }
+    except Exception as e:
+        logger.error(f"Client registration error: {e}")
+        return {
+            "statusCode": 500,
+            "headers": headers,
+            "body": json.dumps({
+                "error": "server_error",
+                "error_description": f"Registration failed: {str(e)}"
+            })
+        }
 
 def handle_authorization_request(event: Dict[str, Any]) -> Dict[str, Any]:
     """Handle OAuth authorization requests"""

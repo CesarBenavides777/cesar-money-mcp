@@ -1,6 +1,14 @@
 {
   "rewrites": [
     {
+      "source": "/.well-known/mcp",
+      "destination": "/api/mcp-discovery"
+    },
+    {
+      "source": "/mcp",
+      "destination": "/api/mcp-discovery"
+    },
+    {
       "source": "/oauth/register",
       "destination": "/api/oauth"
     },
