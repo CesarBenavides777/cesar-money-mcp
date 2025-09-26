@@ -139,12 +139,16 @@ async def get_transactions(
         limit = min(max(1, limit), 500)
         logger.info(f"Using limit: {limit}")
 
-        # Get transactions - remove None values to avoid serialization issues
+        # Get transactions - convert dates to strings to avoid serialization issues
         kwargs = {"limit": limit}
         if parsed_start:
-            kwargs["start_date"] = parsed_start
+            # Convert date object to string for API compatibility
+            kwargs["start_date"] = parsed_start.isoformat()
+            logger.info(f"Converted start_date to string: {kwargs['start_date']}")
         if parsed_end:
-            kwargs["end_date"] = parsed_end
+            # Convert date object to string for API compatibility
+            kwargs["end_date"] = parsed_end.isoformat()
+            logger.info(f"Converted end_date to string: {kwargs['end_date']}")
         if account_id:
             kwargs["account_id"] = account_id
 
@@ -241,7 +245,7 @@ async def get_spending_plan(month: Optional[str] = None) -> str:
             else:
                 end_date = date(now.year, now.month + 1, 1)
 
-        result = await client.get_spending_plan(start_date=start_date, end_date=end_date)
+        result = await client.get_spending_plan(start_date=start_date.isoformat(), end_date=end_date.isoformat())
 
         plan_text = f"📈 **Spending Plan for {start_date.strftime('%Y-%m')}**\n\n"
         plan_text += f"Plan data: {str(result)}\n"
@@ -280,8 +284,8 @@ async def get_account_history(
 
         result = await client.get_account_history(
             account_id=account_id,
-            start_date=parsed_start,
-            end_date=parsed_end
+            start_date=parsed_start.isoformat() if parsed_start else None,
+            end_date=parsed_end.isoformat() if parsed_end else None
         )
 
         if not result:
