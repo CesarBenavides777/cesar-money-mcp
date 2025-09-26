@@ -164,7 +164,8 @@ class handler(BaseHTTPRequestHandler):
 
             # Show login form
             self.send_response(200)
-            self.send_header('Content-Type', 'text/html')
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Cache-Control', 'no-cache')
             self.end_headers()
 
             login_form = f"""<!DOCTYPE html>
@@ -311,7 +312,8 @@ class handler(BaseHTTPRequestHandler):
             if email != MONARCH_EMAIL or password != MONARCH_PASSWORD:
                 # Show login form with error
                 self.send_response(200)
-                self.send_header('Content-Type', 'text/html')
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
+                self.send_header('Cache-Control', 'no-cache')
                 self.end_headers()
 
                 error_form = f"""<!DOCTYPE html>

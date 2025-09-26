@@ -27,7 +27,7 @@
     },
     {
       "source": "/oauth/authorize",
-      "destination": "/api/oauth-working"
+      "destination": "/api/oauth-login"
     },
     {
       "source": "/oauth/token",
