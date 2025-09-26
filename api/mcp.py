@@ -19,15 +19,28 @@ logger = logging.getLogger(__name__)
 
 class handler(BaseHTTPRequestHandler):
     def check_authorization(self):
-        """Check if request is authorized - optional for this implementation"""
-        # For now, we'll allow unauthenticated access for testing
-        # In production, you'd validate Bearer tokens here
+        """Check if request is authorized and return access token"""
         auth_header = self.headers.get('Authorization')
         if auth_header and auth_header.startswith('Bearer '):
-            # Token validation would go here
-            return True
-        # Allow unauthenticated access for demo purposes
-        return True
+            access_token = auth_header.split(' ', 1)[1]
+
+            # Import OAuth functions to validate token
+            try:
+                import sys
+                import os
+                sys.path.append(os.path.dirname(__file__))
+                from oauth import validate_access_token, get_user_credentials
+
+                # Validate the access token
+                token_data = validate_access_token(access_token)
+                if token_data:
+                    # Return the access token for later use
+                    return access_token
+            except ImportError:
+                pass
+
+        # Allow unauthenticated access for demo purposes (fallback to env vars)
+        return "env_fallback"
 
     def send_unauthorized(self):
         """Send 401 Unauthorized with proper WWW-Authenticate header"""
@@ -48,11 +61,109 @@ class handler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
         self.end_headers()
 
+    async def execute_tool_with_credentials(self, tool_name, arguments, user_credentials):
+        """Execute tool with user's OAuth credentials"""
+        # Import required modules
+        sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+        from monarchmoney import MonarchMoney, RequireMFAException
+
+        # Create Monarch client with user's credentials
+        client = MonarchMoney()
+        try:
+            await client.login(
+                email=user_credentials["email"],
+                password=user_credentials["password"],
+                save_session=False,
+                use_saved_session=False
+            )
+        except RequireMFAException:
+            return "MFA required but not configured for OAuth flow"
+        except Exception as e:
+            return f"Authentication failed: {str(e)}"
+
+        # Execute the requested tool
+        try:
+            if tool_name == "get_accounts":
+                result = await client.get_accounts()
+                accounts = result.get('accounts', [])
+                if not accounts:
+                    return "No accounts found."
+
+                account_summary = f"Found {len(accounts)} accounts:\n\n"
+                for account in accounts:
+                    name_str = account.get('displayName', 'Unknown Account')
+                    balance = account.get('currentBalance', 0)
+                    account_type = account.get('type', {}).get('display', 'Unknown')
+                    institution = account.get('institution', {}).get('name', 'Unknown')
+
+                    account_summary += f"📊 **{name_str}**\n"
+                    account_summary += f"   Balance: ${balance:,.2f}\n"
+                    account_summary += f"   Type: {account_type}\n"
+                    account_summary += f"   Institution: {institution}\n"
+                    account_summary += f"   ID: {account.get('id', 'N/A')}\n\n"
+
+                return account_summary
+
+            elif tool_name == "get_transactions":
+                # Parse date arguments
+                kwargs = {"limit": arguments.get("limit", 100)}
+                start_date = arguments.get("start_date")
+                end_date = arguments.get("end_date")
+
+                if start_date:
+                    from datetime import datetime
+                    try:
+                        parsed_start = datetime.strptime(start_date, "%Y-%m-%d").date()
+                        kwargs["start_date"] = parsed_start.isoformat()
+                    except ValueError:
+                        return "Invalid start_date format. Use YYYY-MM-DD format."
+
+                if end_date:
+                    from datetime import datetime
+                    try:
+                        parsed_end = datetime.strptime(end_date, "%Y-%m-%d").date()
+                        kwargs["end_date"] = parsed_end.isoformat()
+                    except ValueError:
+                        return "Invalid end_date format. Use YYYY-MM-DD format."
+
+                if arguments.get("account_id"):
+                    kwargs["account_id"] = arguments["account_id"]
+
+                result = await client.get_transactions(**kwargs)
+                transactions = result.get('allTransactions', {}).get('results', [])
+
+                if not transactions:
+                    return "No transactions found for the specified criteria."
+
+                summary = f"Found {len(transactions)} transactions:\n\n"
+                for tx in transactions[:20]:  # Show first 20
+                    date_str = tx.get('date', 'Unknown')
+                    merchant = tx.get('merchant', {}).get('name', 'Unknown Merchant')
+                    amount = tx.get('amount', 0)
+                    category = tx.get('category', {}).get('name', 'Uncategorized')
+
+                    summary += f"💳 **{date_str}** - {merchant}\n"
+                    summary += f"   Amount: ${amount:,.2f}\n"
+                    summary += f"   Category: {category}\n\n"
+
+                if len(transactions) > 20:
+                    summary += f"... and {len(transactions) - 20} more transactions\n"
+
+                return summary
+
+            # Add other tools as needed...
+            else:
+                return f"Tool '{tool_name}' not yet implemented for OAuth flow"
+
+        except Exception as e:
+            return f"Error executing {tool_name}: {str(e)}"
+
     def do_POST(self):
         """Handle JSON-RPC requests"""
         try:
-            # Check authorization first (currently allows all for demo)
-            if not self.check_authorization():
+            # Check authorization and get access token
+            access_token = self.check_authorization()
+            if not access_token:
                 self.send_unauthorized()
                 return
 
@@ -175,32 +286,45 @@ class handler(BaseHTTPRequestHandler):
                     self.wfile.write(json.dumps(error_response).encode())
                     return
 
-                # Execute tool asynchronously
+                # Execute tool asynchronously with user credentials if available
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
 
                 try:
-                    # For now, always use the environment variable server
-                    # OAuth integration would require updating the tool signatures
-                    from fastmcp_server import mcp as fastmcp_server
+                    # Get user credentials from access token if not using env fallback
+                    user_credentials = None
+                    if access_token != "env_fallback":
+                        try:
+                            from oauth import get_user_credentials
+                            user_credentials = get_user_credentials(access_token)
+                        except ImportError:
+                            pass
 
-                    # Get tools from FastMCP (async method)
-                    tools = loop.run_until_complete(fastmcp_server.get_tools())
+                    # Execute tool with appropriate credentials
+                    if user_credentials:
+                        # Use user's OAuth credentials
+                        result = loop.run_until_complete(
+                            self.execute_tool_with_credentials(
+                                tool_name, arguments, user_credentials
+                            )
+                        )
+                    else:
+                        # Fall back to environment variables (existing behavior)
+                        from fastmcp_server import mcp as fastmcp_server
+                        tools = loop.run_until_complete(fastmcp_server.get_tools())
 
-                    # Check if tool exists
-                    if tool_name not in tools:
-                        raise ValueError(f"Unknown tool: {tool_name}")
+                        if tool_name not in tools:
+                            raise ValueError(f"Unknown tool: {tool_name}")
 
-                    # Get the tool and execute it using run method
-                    tool = tools[tool_name]
-                    tool_result = loop.run_until_complete(tool.run(arguments))
+                        tool = tools[tool_name]
+                        tool_result = loop.run_until_complete(tool.run(arguments))
 
-                    # Extract the text content from the result
-                    result = ""
-                    if tool_result.content:
-                        for content in tool_result.content:
-                            if hasattr(content, 'text'):
-                                result += content.text
+                        # Extract the text content from the result
+                        result = ""
+                        if tool_result.content:
+                            for content in tool_result.content:
+                                if hasattr(content, 'text'):
+                                    result += content.text
 
                     response = {
                         "jsonrpc": "2.0",
