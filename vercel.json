@@ -14,6 +14,18 @@
       "destination": "/api/mcp-discovery"
     },
     {
+      "source": "/.well-known/oauth-authorization-server",
+      "destination": "/api/mcp-discovery"
+    },
+    {
+      "source": "/.well-known/openid-configuration",
+      "destination": "/api/mcp-discovery"
+    },
+    {
+      "source": "/.well-known/oauth-protected-resource",
+      "destination": "/api/mcp-discovery"
+    },
+    {
       "source": "/mcp",
       "destination": "/api/mcp-discovery"
     },
@@ -27,6 +39,10 @@
     },
     {
       "source": "/mcp/register",
+      "destination": "/api/oauth-working"
+    },
+    {
+      "source": "/mcp/oauth/register",
       "destination": "/api/oauth-working"
     },
     {
