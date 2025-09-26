@@ -69,6 +69,10 @@
       "destination": "/api/index"
     },
     {
+      "source": "/debug(.*)",
+      "destination": "/api/debug"
+    },
+    {
       "source": "/api$",
       "destination": "/api/mcp"
     }

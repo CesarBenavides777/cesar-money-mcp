@@ -14,11 +14,18 @@ MONARCH_EMAIL = os.getenv("MONARCH_EMAIL")
 MONARCH_PASSWORD = os.getenv("MONARCH_PASSWORD")
 MONARCH_MFA_SECRET = os.getenv("MONARCH_MFA_SECRET")
 
-# In-memory storage for OAuth clients (in production, use a database)
-oauth_clients = {}
-auth_codes = {}
-access_tokens = {}
-user_credentials = {}  # Store user credentials by access token
+# Import the SQLite database module
+try:
+    from oauth_db import (
+        store_oauth_client, get_oauth_client,
+        store_auth_code, get_auth_code, delete_auth_code,
+        store_access_token, get_access_token,
+        cleanup_expired_tokens
+    )
+    DB_AVAILABLE = True
+except ImportError as e:
+    print(f"Database import failed: {e}")
+    DB_AVAILABLE = False
 
 def generate_client_credentials():
     """Generate new OAuth client credentials"""
@@ -26,38 +33,62 @@ def generate_client_credentials():
     client_secret = secrets.token_urlsafe(32)
     return client_id, client_secret
 
+# In-memory fallback storage when database is not available
+_fallback_clients = {}
+_fallback_auth_codes = {}
+_fallback_access_tokens = {}
+
 def generate_auth_code(client_id, user_email=None, user_password=None):
     """Generate authorization code for client"""
     auth_code = secrets.token_urlsafe(32)
-    auth_codes[auth_code] = {
-        "client_id": client_id,
-        "user_email": user_email,
-        "user_password": user_password
-    }
+    if DB_AVAILABLE:
+        store_auth_code(auth_code, client_id, user_email, user_password)
+    else:
+        _fallback_auth_codes[auth_code] = {
+            "client_id": client_id,
+            "user_email": user_email,
+            "user_password": user_password
+        }
     return auth_code
 
-def generate_access_token(client_id, auth_code):
+def generate_access_token(client_id, auth_code, user_email=None, user_password=None):
     """Generate access token for client and bind to user credentials"""
     access_token = secrets.token_urlsafe(32)
-    access_tokens[access_token] = {
-        "client_id": client_id,
-        "auth_code": auth_code,
-        "issued_at": json.dumps({"timestamp": "2024-09-26T18:21:12Z"}),
-        "expires_in": 3600
-    }
+    if DB_AVAILABLE:
+        store_access_token(access_token, client_id, auth_code, user_email, user_password)
+    else:
+        _fallback_access_tokens[access_token] = {
+            "client_id": client_id,
+            "auth_code": auth_code,
+            "user_email": user_email,
+            "user_password": user_password
+        }
     return access_token
 
 def get_user_credentials(access_token):
     """Get user credentials associated with an access token"""
-    if access_token in user_credentials:
-        return user_credentials[access_token]
+    if DB_AVAILABLE:
+        token_data = get_access_token(access_token)
+        if token_data and token_data.get('user_email'):
+            return {
+                "email": token_data["user_email"],
+                "password": token_data["user_password"]
+            }
+    else:
+        token_data = _fallback_access_tokens.get(access_token)
+        if token_data and token_data.get('user_email'):
+            return {
+                "email": token_data["user_email"],
+                "password": token_data["user_password"]
+            }
     return None
 
 def validate_access_token(access_token):
     """Validate an access token and return associated data"""
-    if access_token in access_tokens:
-        return access_tokens[access_token]
-    return None
+    if DB_AVAILABLE:
+        return get_access_token(access_token)
+    else:
+        return _fallback_access_tokens.get(access_token)
 
 class handler(BaseHTTPRequestHandler):
     def get_base_url(self):
@@ -118,60 +149,86 @@ class handler(BaseHTTPRequestHandler):
             return
 
         # Parse query parameters - handle malformed URLs with multiple question marks
-        # First, let's extract all parameters from the entire URL string
+        # This handles URLs like: /oauth?action=authorize?response_type=code&client_id=abc
         import re
-        from urllib.parse import unquote
+        from urllib.parse import unquote, parse_qs
 
-        # Extract all parameters using regex to handle malformed URLs
-        all_params = {}
-
-        # Find all key=value pairs in the URL
-        param_pattern = r'([a-zA-Z_][a-zA-Z0-9_]*)=([^&?]*)'
-        matches = re.findall(param_pattern, path)
-
-        for key, value in matches:
-            # URL decode the value
-            decoded_value = unquote(value)
-            if key in all_params:
-                # Handle multiple values for same key
-                if isinstance(all_params[key], list):
-                    all_params[key].append(decoded_value)
-                else:
-                    all_params[key] = [all_params[key], decoded_value]
-            else:
-                all_params[key] = [decoded_value]
-
-        # Convert to same format as parse_qs for compatibility
-        query_params = all_params
-
-        # Extract key parameters
-        action = query_params.get('action', [''])[0] if 'action' in query_params else ''
-        response_type = query_params.get('response_type', [''])[0] if 'response_type' in query_params else ''
-        client_id = query_params.get('client_id', [''])[0] if 'client_id' in query_params else ''
-
-        # Debug logging
+        # Debug logging setup
         import logging
         logging.basicConfig(level=logging.INFO)
         logger = logging.getLogger(__name__)
-        logger.info(f"OAuth GET request - path: {path}")
-        logger.info(f"Extracted params - action: {action}, response_type: {response_type}, client_id: {client_id}")
+        logger.info(f"OAuth GET request - raw path: {path}")
+
+        # Strategy: Extract the query part and normalize it
+        # Handle malformed URLs with double question marks and URL encoding
+        if '?' in path:
+            # Split on first ?
+            base_path, query_string = path.split('?', 1)
+
+            # Replace any additional ? with & AND handle URL-encoded ? (%3F)
+            # Also handle URL-encoded = (%3D) and & (%26)
+            normalized_query = (query_string
+                               .replace('?', '&')
+                               .replace('%3F', '&')
+                               .replace('%3D', '=')
+                               .replace('%26', '&'))
+
+            # Now parse normally
+            query_params = parse_qs(normalized_query)
+            logger.info(f"Original query: {query_string}")
+            logger.info(f"Normalized query string: {normalized_query}")
+        else:
+            query_params = {}
+
+        # Extract key parameters (parse_qs returns lists, so get first element)
+        action = query_params.get('action', [''])[0]
+        response_type = query_params.get('response_type', [''])[0]
+        client_id = query_params.get('client_id', [''])[0]
+
+        logger.info(f"Extracted params - action: '{action}', response_type: '{response_type}', client_id: '{client_id}'")
         logger.info(f"All parsed params: {query_params}")
 
         # OAuth authorization endpoint - handle incoming authorization request
         # This should trigger when Claude Code sends user for authorization
         # Check for authorization request FIRST (response_type=code + client_id present)
-        if response_type == "code" and client_id:
+        # OR error redirects (error + client_id present)
+        # This takes priority over action=authorize to handle malformed URLs
+        error = query_params.get('error', [''])[0]
+        if (response_type == "code" and client_id) or (error and client_id):
+            logger.info(f"Detected authorization request - showing login form")
             redirect_uri = query_params.get('redirect_uri', [''])[0]
             state = query_params.get('state', [''])[0]
             scope = query_params.get('scope', [''])[0]
 
             # Auto-register the client if it doesn't exist (for demo purposes)
-            if client_id not in oauth_clients:
-                oauth_clients[client_id] = {
-                    "client_secret": secrets.token_urlsafe(32),
-                    "redirect_uris": [redirect_uri],
-                    "created_at": json.dumps({"timestamp": "2024-09-26T18:21:12Z"})
-                }
+            if DB_AVAILABLE:
+                client_data = get_oauth_client(client_id)
+            else:
+                client_data = _fallback_clients.get(client_id)
+
+            if not client_data:
+                client_secret = secrets.token_urlsafe(32)
+                redirect_uris = [redirect_uri] if redirect_uri else []
+                if DB_AVAILABLE:
+                    store_oauth_client(client_id, client_secret, redirect_uris)
+                else:
+                    _fallback_clients[client_id] = {
+                        "client_secret": client_secret,
+                        "redirect_uris": redirect_uris
+                    }
+
+            # Check for error messages
+            error_description = query_params.get('error_description', [''])[0]
+            error_message = ""
+            if error:
+                if error == "invalid_credentials":
+                    error_message = f'''<div style="background: #ffe6e6; color: #d00; padding: 10px; border-radius: 4px; margin-bottom: 20px; border: 1px solid #ffb3b3;">
+                        <strong>⚠️ Authentication Failed:</strong> {unquote(error_description) if error_description else "Invalid Monarch Money credentials. Please check your email and password."}
+                    </div>'''
+                else:
+                    error_message = f'''<div style="background: #ffe6e6; color: #d00; padding: 10px; border-radius: 4px; margin-bottom: 20px; border: 1px solid #ffb3b3;">
+                        <strong>⚠️ Error:</strong> {unquote(error_description) if error_description else error}
+                    </div>'''
 
             # Show login form
             self.send_response(200)
@@ -195,6 +252,7 @@ class handler(BaseHTTPRequestHandler):
 </head>
 <body>
     <h2>🏦 Monarch Money MCP Authorization</h2>
+    {error_message}
     <div class="info">
         <strong>Client:</strong> {client_id}<br>
         <strong>Requesting access to:</strong> Your Monarch Money financial data<br>
@@ -214,6 +272,12 @@ class handler(BaseHTTPRequestHandler):
         <div class="form-group">
             <label for="password">Monarch Money Password:</label>
             <input type="password" name="password" id="password" required>
+        </div>
+
+        <div class="form-group">
+            <label for="mfa_secret">MFA Secret Key (if enabled):</label>
+            <input type="text" name="mfa_secret" id="mfa_secret" placeholder="Your MFA secret key (base32 string from setup)">
+            <small style="color: #666; font-size: 12px;">This is the secret key you got when setting up MFA, not the 6-digit code. Leave blank if you don't have MFA enabled.</small>
         </div>
 
         <button type="submit">Authorize Access</button>
@@ -236,24 +300,29 @@ class handler(BaseHTTPRequestHandler):
             self.end_headers()
 
             client_id, client_secret = generate_client_credentials()
-            oauth_clients[client_id] = {
-                "client_secret": client_secret,
-                "redirect_uris": [
-                    "https://api.agent.ai/api/v3/mcp/flow/redirect",
-                    "https://agent.ai/oauth/callback",
-                    "https://claude.ai/oauth/callback",
-                    "https://claude.ai/api/mcp/auth_callback",
-                    f"{base_url}/callback",
-                    "http://localhost:3000/callback",
-                    "mcp://oauth/callback"
-                ],
-                "created_at": json.dumps({"timestamp": "2024-09-26T18:21:12Z"})
-            }
+            redirect_uris = [
+                "https://api.agent.ai/api/v3/mcp/flow/redirect",
+                "https://agent.ai/oauth/callback",
+                "https://claude.ai/oauth/callback",
+                "https://claude.ai/api/mcp/auth_callback",
+                f"{base_url}/callback",
+                "http://localhost:3000/callback",
+                "mcp://oauth/callback"
+            ]
+
+            # Store client in database or fallback
+            if DB_AVAILABLE:
+                store_oauth_client(client_id, client_secret, redirect_uris)
+            else:
+                _fallback_clients[client_id] = {
+                    "client_secret": client_secret,
+                    "redirect_uris": redirect_uris
+                }
 
             response = {
                 "client_id": client_id,
                 "client_secret": client_secret,
-                "redirect_uris": oauth_clients[client_id]["redirect_uris"],
+                "redirect_uris": redirect_uris,
                 "grant_types": ["authorization_code"],
                 "response_types": ["code"],
                 "scope": "mcp:read mcp:write accounts:read transactions:read budgets:read"
@@ -261,71 +330,6 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(response, indent=2).encode())
             return
 
-        # OAuth authorization endpoint - for when Claude Code redirects user for login
-        elif action == "authorize" or (response_type == "code" and client_id and not action):
-            redirect_uri = query_params.get('redirect_uri', [''])[0]
-            state = query_params.get('state', [''])[0]
-            scope = query_params.get('scope', [''])[0]
-
-            # Auto-register client if it doesn't exist (for demo purposes)
-            if client_id not in oauth_clients:
-                oauth_clients[client_id] = {
-                    "client_secret": secrets.token_urlsafe(32),
-                    "redirect_uris": [redirect_uri],
-                    "created_at": json.dumps({"timestamp": "2024-09-26T18:21:12Z"})
-                }
-
-            # Show login form
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/html; charset=utf-8')
-            self.send_header('Cache-Control', 'no-cache')
-            self.end_headers()
-
-            login_form = f'''<!DOCTYPE html>
-<html>
-<head>
-    <title>Monarch Money MCP Authorization</title>
-    <style>
-        body {{ font-family: Arial, sans-serif; max-width: 400px; margin: 100px auto; padding: 20px; }}
-        .form-group {{ margin-bottom: 15px; }}
-        label {{ display: block; margin-bottom: 5px; font-weight: bold; }}
-        input {{ width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }}
-        button {{ width: 100%; padding: 10px; background: #007cba; color: white; border: none; border-radius: 4px; cursor: pointer; }}
-        button:hover {{ background: #005a87; }}
-        .info {{ background: #f0f0f0; padding: 10px; border-radius: 4px; margin-bottom: 20px; }}
-    </style>
-</head>
-<body>
-    <h2>🏦 Monarch Money MCP Authorization</h2>
-    <div class="info">
-        <strong>Client:</strong> {client_id}<br>
-        <strong>Requesting access to:</strong> Your Monarch Money financial data
-    </div>
-    <form method="post" action="/oauth?action=process">
-        <input type="hidden" name="client_id" value="{client_id}">
-        <input type="hidden" name="redirect_uri" value="{redirect_uri}">
-        <input type="hidden" name="state" value="{state}">
-        <input type="hidden" name="response_type" value="code">
-
-        <div class="form-group">
-            <label for="email">Monarch Money Email:</label>
-            <input type="email" name="email" id="email" required>
-        </div>
-
-        <div class="form-group">
-            <label for="password">Monarch Money Password:</label>
-            <input type="password" name="password" id="password" required>
-        </div>
-
-        <button type="submit">Authorize Access</button>
-    </form>
-    <p style="font-size: 12px; color: #666; margin-top: 20px;">
-        Your credentials are verified against your configured Monarch Money account and are not stored.
-    </p>
-</body>
-</html>'''
-            self.wfile.write(login_form.encode())
-            return
 
         # OAuth token endpoint (GET fallback)
         elif action == "token":
@@ -334,7 +338,12 @@ class handler(BaseHTTPRequestHandler):
             auth_code = token_params.get('code', [''])[0]
             client_id = token_params.get('client_id', [''])[0]
 
-            if auth_code not in auth_codes:
+            if DB_AVAILABLE:
+                auth_data = get_auth_code(auth_code)
+            else:
+                auth_data = _fallback_auth_codes.get(auth_code)
+
+            if not auth_data:
                 self.send_response(400)
                 self.send_header('Content-Type', 'application/json')
                 self.send_header('Access-Control-Allow-Origin', '*')
@@ -345,7 +354,6 @@ class handler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps(error_response).encode())
                 return
 
-            auth_data = auth_codes[auth_code]
             if auth_data["client_id"] != client_id:
                 self.send_response(400)
                 self.send_header('Content-Type', 'application/json')
@@ -358,14 +366,18 @@ class handler(BaseHTTPRequestHandler):
                 return
 
             # Generate access token and store user credentials
-            access_token = generate_access_token(client_id, auth_code)
-            user_credentials[access_token] = {
-                "email": auth_data["user_email"],
-                "password": auth_data["user_password"]
-            }
+            access_token = generate_access_token(
+                client_id, auth_code,
+                auth_data["user_email"],
+                auth_data["user_password"]
+            )
 
             # Clean up auth code
-            del auth_codes[auth_code]
+            if DB_AVAILABLE:
+                delete_auth_code(auth_code)
+            else:
+                if auth_code in _fallback_auth_codes:
+                    del _fallback_auth_codes[auth_code]
 
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
@@ -426,6 +438,7 @@ class handler(BaseHTTPRequestHandler):
 
             email = form_data.get('email', [''])[0]
             password = form_data.get('password', [''])[0]
+            mfa_secret = form_data.get('mfa_secret', [''])[0]
             client_id = form_data.get('client_id', [''])[0]
             redirect_uri = form_data.get('redirect_uri', [''])[0]
             state = form_data.get('state', [''])[0]
@@ -449,19 +462,51 @@ class handler(BaseHTTPRequestHandler):
 
                 try:
                     # Attempt login with user's credentials
-                    loop.run_until_complete(client.login(
-                        email=email,
-                        password=password,
-                        save_session=False,
-                        use_saved_session=False
-                    ))
+                    login_kwargs = {
+                        "email": email,
+                        "password": password,
+                        "save_session": False,
+                        "use_saved_session": False
+                    }
+
+                    # Add MFA secret key if provided
+                    if mfa_secret and mfa_secret.strip():
+                        login_kwargs["mfa_secret_key"] = mfa_secret.strip()
+
+                    loop.run_until_complete(client.login(**login_kwargs))
                     # If we get here, credentials are valid
                     # Generate auth code with user credentials
                     auth_code = generate_auth_code(client_id, email, password)
 
                 except Exception as login_error:
+                    # Log the actual error for debugging
+                    import logging
+                    logging.basicConfig(level=logging.INFO)
+                    logger = logging.getLogger(__name__)
+                    logger.error(f"Monarch Money login failed: {str(login_error)}")
+                    logger.error(f"Error type: {type(login_error).__name__}")
+
+                    # Provide more specific error messages
+                    error_msg = "Authentication failed"
+                    error_str = str(login_error).lower()
+
+                    if "mfa" in error_str or "two-factor" in error_str or "multi-factor" in error_str or "base32" in error_str:
+                        if not mfa_secret:
+                            error_msg = "MFA/2FA is required for your account. Please enter your MFA secret key (the base32 string you got when setting up your authenticator app)."
+                        else:
+                            error_msg = "Invalid MFA secret key. Please check that you entered the correct base32 secret key from your MFA setup."
+                    elif "invalid" in error_str or "unauthorized" in error_str:
+                        error_msg = "Invalid email or password. Please check your Monarch Money credentials."
+                    elif "network" in error_str or "timeout" in error_str:
+                        error_msg = "Network error connecting to Monarch Money. Please try again."
+                    elif "rate" in error_str or "limit" in error_str:
+                        error_msg = "Too many login attempts. Please wait and try again."
+                    else:
+                        error_msg = f"Login failed: {str(login_error)}"
+
                     # Login failed - redirect back with error
-                    error_redirect = f"/oauth?action=authorize&client_id={client_id}&redirect_uri={redirect_uri}&state={state}&error=invalid_credentials&error_description=Invalid Monarch Money credentials"
+                    from urllib.parse import quote
+                    error_redirect = f"/oauth?action=authorize&client_id={client_id}&redirect_uri={redirect_uri}&state={state}&error=invalid_credentials&error_description={quote(error_msg)}"
                     self.send_response(302)
                     self.send_header('Location', error_redirect)
                     self.end_headers()
@@ -495,7 +540,12 @@ class handler(BaseHTTPRequestHandler):
             auth_code = token_params.get('code', [''])[0]
             client_id = token_params.get('client_id', [''])[0]
 
-            if auth_code not in auth_codes:
+            if DB_AVAILABLE:
+                auth_data = get_auth_code(auth_code)
+            else:
+                auth_data = _fallback_auth_codes.get(auth_code)
+
+            if not auth_data:
                 self.send_response(400)
                 self.send_header('Content-Type', 'application/json')
                 self.send_header('Access-Control-Allow-Origin', '*')
@@ -504,7 +554,6 @@ class handler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps(error_response).encode())
                 return
 
-            auth_data = auth_codes[auth_code]
             if auth_data["client_id"] != client_id:
                 self.send_response(400)
                 self.send_header('Content-Type', 'application/json')
@@ -515,14 +564,18 @@ class handler(BaseHTTPRequestHandler):
                 return
 
             # Generate access token and store user credentials
-            access_token = generate_access_token(client_id, auth_code)
-            user_credentials[access_token] = {
-                "email": auth_data["user_email"],
-                "password": auth_data["user_password"]
-            }
+            access_token = generate_access_token(
+                client_id, auth_code,
+                auth_data["user_email"],
+                auth_data["user_password"]
+            )
 
             # Clean up auth code
-            del auth_codes[auth_code]
+            if DB_AVAILABLE:
+                delete_auth_code(auth_code)
+            else:
+                if auth_code in _fallback_auth_codes:
+                    del _fallback_auth_codes[auth_code]
 
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')

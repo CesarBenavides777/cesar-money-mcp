@@ -39,8 +39,8 @@ class handler(BaseHTTPRequestHandler):
             except ImportError:
                 pass
 
-        # Allow unauthenticated access for demo purposes (fallback to env vars)
-        return "env_fallback"
+        # OAuth is required - no fallback to environment variables
+        return None
 
     def send_unauthorized(self):
         """Send 401 Unauthorized with proper WWW-Authenticate header"""
@@ -91,16 +91,22 @@ class handler(BaseHTTPRequestHandler):
 
                 account_summary = f"Found {len(accounts)} accounts:\n\n"
                 for account in accounts:
-                    name_str = account.get('displayName', 'Unknown Account')
-                    balance = account.get('currentBalance', 0)
-                    account_type = account.get('type', {}).get('display', 'Unknown')
-                    institution = account.get('institution', {}).get('name', 'Unknown')
+                    name_str = account.get('displayName') or 'Unknown Account'
+                    balance = account.get('currentBalance') or 0
+
+                    # Safely extract account type
+                    type_obj = account.get('type') or {}
+                    account_type = type_obj.get('display') or 'Unknown'
+
+                    # Safely extract institution name
+                    institution_obj = account.get('institution') or {}
+                    institution = institution_obj.get('name') or 'Unknown'
 
                     account_summary += f"📊 **{name_str}**\n"
                     account_summary += f"   Balance: ${balance:,.2f}\n"
                     account_summary += f"   Type: {account_type}\n"
                     account_summary += f"   Institution: {institution}\n"
-                    account_summary += f"   ID: {account.get('id', 'N/A')}\n\n"
+                    account_summary += f"   ID: {account.get('id') or 'N/A'}\n\n"
 
                 return account_summary
 
@@ -137,10 +143,17 @@ class handler(BaseHTTPRequestHandler):
 
                 summary = f"Found {len(transactions)} transactions:\n\n"
                 for tx in transactions[:20]:  # Show first 20
-                    date_str = tx.get('date', 'Unknown')
-                    merchant = tx.get('merchant', {}).get('name', 'Unknown Merchant')
-                    amount = tx.get('amount', 0)
-                    category = tx.get('category', {}).get('name', 'Uncategorized')
+                    date_str = tx.get('date') or 'Unknown'
+
+                    # Safely extract merchant name
+                    merchant_obj = tx.get('merchant') or {}
+                    merchant = merchant_obj.get('name') or 'Unknown Merchant'
+
+                    amount = tx.get('amount') or 0
+
+                    # Safely extract category name
+                    category_obj = tx.get('category') or {}
+                    category = category_obj.get('name') or 'Uncategorized'
 
                     summary += f"💳 **{date_str}** - {merchant}\n"
                     summary += f"   Amount: ${amount:,.2f}\n"
@@ -161,12 +174,6 @@ class handler(BaseHTTPRequestHandler):
     def do_POST(self):
         """Handle JSON-RPC requests"""
         try:
-            # Check authorization and get access token
-            access_token = self.check_authorization()
-            if not access_token:
-                self.send_unauthorized()
-                return
-
             # Set CORS headers
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
@@ -205,6 +212,19 @@ class handler(BaseHTTPRequestHandler):
                 }
                 self.wfile.write(json.dumps(error_response).encode())
                 return
+
+            # Check if authentication is required for this method
+            auth_required_methods = ["tools/call"]
+            requires_auth = method in auth_required_methods
+
+            if requires_auth:
+                # Check authorization and get access token
+                access_token = self.check_authorization()
+                if not access_token:
+                    self.send_unauthorized()
+                    return
+            else:
+                access_token = None
 
             # Handle different MCP methods
             if method == "tools/list":
@@ -291,9 +311,9 @@ class handler(BaseHTTPRequestHandler):
                 asyncio.set_event_loop(loop)
 
                 try:
-                    # Get user credentials from access token if not using env fallback
+                    # Get user credentials from access token if available
                     user_credentials = None
-                    if access_token != "env_fallback":
+                    if access_token and access_token != "env_fallback":
                         try:
                             from oauth import get_user_credentials
                             user_credentials = get_user_credentials(access_token)
