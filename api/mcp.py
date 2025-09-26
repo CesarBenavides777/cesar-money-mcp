@@ -145,23 +145,16 @@ class handler(BaseHTTPRequestHandler):
                 asyncio.set_event_loop(loop)
 
                 try:
-                    # Call your FastMCP server functions directly
-                    from fastmcp_server import get_accounts, get_transactions, get_budgets, get_spending_plan, get_account_history
+                    # Import the FastMCP server
+                    from fastmcp_server import mcp as fastmcp_server
 
-                    tool_map = {
-                        "get_accounts": get_accounts,
-                        "get_transactions": get_transactions,
-                        "get_budgets": get_budgets,
-                        "get_spending_plan": get_spending_plan,
-                        "get_account_history": get_account_history
-                    }
-
-                    if tool_name not in tool_map:
+                    # Check if tool exists
+                    if tool_name not in fastmcp_server.tools:
                         raise ValueError(f"Unknown tool: {tool_name}")
 
-                    # Execute the tool
-                    tool_func = tool_map[tool_name]
-                    result = loop.run_until_complete(tool_func(**arguments))
+                    # Get the tool and execute it
+                    tool = fastmcp_server.tools[tool_name]
+                    result = loop.run_until_complete(tool.func(**arguments))
 
                     response = {
                         "jsonrpc": "2.0",
