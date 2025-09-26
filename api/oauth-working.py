@@ -162,15 +162,58 @@ class handler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps(error_response).encode())
                 return
 
-            # Generate authorization code for this client
-            auth_code = generate_auth_code(client_id)
-
-            # Build callback URL with real parameters
-            callback_url = f"{redirect_uri}?code={auth_code}&state={state}"
-
-            self.send_response(302)
-            self.send_header('Location', callback_url)
+            # Show login form
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html')
             self.end_headers()
+
+            login_form = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Monarch Money MCP Authorization</title>
+                <style>
+                    body {{ font-family: Arial, sans-serif; max-width: 400px; margin: 100px auto; padding: 20px; }}
+                    .form-group {{ margin-bottom: 15px; }}
+                    label {{ display: block; margin-bottom: 5px; font-weight: bold; }}
+                    input {{ width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }}
+                    button {{ width: 100%; padding: 10px; background: #007cba; color: white; border: none; border-radius: 4px; cursor: pointer; }}
+                    button:hover {{ background: #005a87; }}
+                    .error {{ color: red; margin-top: 10px; }}
+                    .info {{ background: #f0f0f0; padding: 10px; border-radius: 4px; margin-bottom: 20px; }}
+                </style>
+            </head>
+            <body>
+                <h2>🏦 Monarch Money MCP Authorization</h2>
+                <div class="info">
+                    <strong>Client:</strong> {client_id}<br>
+                    <strong>Requesting access to:</strong> Your Monarch Money financial data
+                </div>
+                <form method="post" action="/oauth/authorize">
+                    <input type="hidden" name="client_id" value="{client_id}">
+                    <input type="hidden" name="redirect_uri" value="{redirect_uri}">
+                    <input type="hidden" name="state" value="{state}">
+                    <input type="hidden" name="response_type" value="code">
+
+                    <div class="form-group">
+                        <label for="email">Monarch Money Email:</label>
+                        <input type="email" name="email" id="email" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="password">Monarch Money Password:</label>
+                        <input type="password" name="password" id="password" required>
+                    </div>
+
+                    <button type="submit">Authorize Access</button>
+                </form>
+                <p style="font-size: 12px; color: #666; margin-top: 20px;">
+                    Your credentials are verified against your configured Monarch Money account and are not stored.
+                </p>
+            </body>
+            </html>
+            """
+            self.wfile.write(login_form.encode())
             return
 
         # OAuth token endpoint
@@ -250,7 +293,93 @@ class handler(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps(response, indent=2).encode())
 
     def do_POST(self):
-        self.do_GET()
+        path = self.path
+
+        # Handle OAuth authorization form submission
+        if "authorize" in path:
+            # Parse POST data
+            content_length = int(self.headers.get('Content-Length', 0))
+            post_data = self.rfile.read(content_length).decode('utf-8')
+            form_data = parse_qs(post_data)
+
+            # Extract form values
+            email = form_data.get('email', [''])[0]
+            password = form_data.get('password', [''])[0]
+            client_id = form_data.get('client_id', [''])[0]
+            redirect_uri = form_data.get('redirect_uri', [''])[0]
+            state = form_data.get('state', [''])[0]
+
+            # Validate credentials against environment variables
+            if email != MONARCH_EMAIL or password != MONARCH_PASSWORD:
+                # Show login form with error
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html')
+                self.end_headers()
+
+                error_form = f"""
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Monarch Money MCP Authorization</title>
+                    <style>
+                        body {{ font-family: Arial, sans-serif; max-width: 400px; margin: 100px auto; padding: 20px; }}
+                        .form-group {{ margin-bottom: 15px; }}
+                        label {{ display: block; margin-bottom: 5px; font-weight: bold; }}
+                        input {{ width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }}
+                        button {{ width: 100%; padding: 10px; background: #007cba; color: white; border: none; border-radius: 4px; cursor: pointer; }}
+                        button:hover {{ background: #005a87; }}
+                        .error {{ color: red; margin-top: 10px; background: #ffebee; padding: 10px; border-radius: 4px; }}
+                        .info {{ background: #f0f0f0; padding: 10px; border-radius: 4px; margin-bottom: 20px; }}
+                    </style>
+                </head>
+                <body>
+                    <h2>🏦 Monarch Money MCP Authorization</h2>
+                    <div class="info">
+                        <strong>Client:</strong> {client_id}<br>
+                        <strong>Requesting access to:</strong> Your Monarch Money financial data
+                    </div>
+                    <div class="error">
+                        ❌ Invalid credentials. Please check your email and password.
+                    </div>
+                    <form method="post" action="/oauth/authorize">
+                        <input type="hidden" name="client_id" value="{client_id}">
+                        <input type="hidden" name="redirect_uri" value="{redirect_uri}">
+                        <input type="hidden" name="state" value="{state}">
+                        <input type="hidden" name="response_type" value="code">
+
+                        <div class="form-group">
+                            <label for="email">Monarch Money Email:</label>
+                            <input type="email" name="email" id="email" value="{email}" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="password">Monarch Money Password:</label>
+                            <input type="password" name="password" id="password" required>
+                        </div>
+
+                        <button type="submit">Authorize Access</button>
+                    </form>
+                    <p style="font-size: 12px; color: #666; margin-top: 20px;">
+                        Your credentials are verified against your configured Monarch Money account and are not stored.
+                    </p>
+                </body>
+                </html>
+                """
+                self.wfile.write(error_form.encode())
+                return
+
+            # Credentials are valid - generate auth code and redirect
+            auth_code = generate_auth_code(client_id)
+            callback_url = f"{redirect_uri}?code={auth_code}&state={state}"
+
+            self.send_response(302)
+            self.send_header('Location', callback_url)
+            self.end_headers()
+            return
+
+        # Handle other POST requests (like token endpoint)
+        else:
+            self.do_GET()
 
     def do_OPTIONS(self):
         self.send_response(200)
