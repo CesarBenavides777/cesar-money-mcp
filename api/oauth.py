@@ -73,18 +73,18 @@ class handler(BaseHTTPRequestHandler):
         return base_url
 
     def do_GET(self):
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-        self.end_headers()
-
         path = self.path
         base_url = self.get_base_url()
 
         # OAuth 2.0 Authorization Server Metadata (RFC 8414)
         if ".well-known/oauth-authorization-server" in path:
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+            self.end_headers()
+
             response = {
                 "issuer": base_url,
                 "authorization_endpoint": f"{base_url}/oauth?action=authorize",
@@ -101,6 +101,13 @@ class handler(BaseHTTPRequestHandler):
 
         # OAuth 2.0 Protected Resource Metadata (RFC 9728)
         elif ".well-known/oauth-protected-resource" in path:
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+            self.end_headers()
+
             response = {
                 "resource": base_url,
                 "authorization_servers": [base_url],
@@ -111,29 +118,48 @@ class handler(BaseHTTPRequestHandler):
             return
 
         # Parse query parameters - handle malformed URLs with multiple question marks
-        if '?' in path:
-            # Split on first ? to separate path from query string
-            path_part, query_string = path.split('?', 1)
-            # If there are multiple ?, merge all query parts
-            if '?' in query_string:
-                query_string = query_string.replace('?', '&')
-            query_params = parse_qs(query_string)
-        else:
-            query_params = {}
+        # First, let's extract all parameters from the entire URL string
+        import re
+        from urllib.parse import unquote
 
-        action = query_params.get('action', [''])[0]
+        # Extract all parameters using regex to handle malformed URLs
+        all_params = {}
 
-        # Check if this is an authorization request (has response_type and client_id)
-        response_type = query_params.get('response_type', [''])[0]
-        client_id = query_params.get('client_id', [''])[0]
+        # Find all key=value pairs in the URL
+        param_pattern = r'([a-zA-Z_][a-zA-Z0-9_]*)=([^&?]*)'
+        matches = re.findall(param_pattern, path)
+
+        for key, value in matches:
+            # URL decode the value
+            decoded_value = unquote(value)
+            if key in all_params:
+                # Handle multiple values for same key
+                if isinstance(all_params[key], list):
+                    all_params[key].append(decoded_value)
+                else:
+                    all_params[key] = [all_params[key], decoded_value]
+            else:
+                all_params[key] = [decoded_value]
+
+        # Convert to same format as parse_qs for compatibility
+        query_params = all_params
+
+        # Extract key parameters
+        action = query_params.get('action', [''])[0] if 'action' in query_params else ''
+        response_type = query_params.get('response_type', [''])[0] if 'response_type' in query_params else ''
+        client_id = query_params.get('client_id', [''])[0] if 'client_id' in query_params else ''
 
         # Debug logging
         import logging
-        logger.info(f"OAuth request - action: {action}, response_type: {response_type}, client_id: {client_id}")
-        logger.info(f"Full query params: {query_params}")
+        logging.basicConfig(level=logging.INFO)
+        logger = logging.getLogger(__name__)
+        logger.info(f"OAuth GET request - path: {path}")
+        logger.info(f"Extracted params - action: {action}, response_type: {response_type}, client_id: {client_id}")
+        logger.info(f"All parsed params: {query_params}")
 
         # OAuth authorization endpoint - handle incoming authorization request
         # This should trigger when Claude Code sends user for authorization
+        # Check for authorization request FIRST (response_type=code + client_id present)
         if response_type == "code" and client_id:
             redirect_uri = query_params.get('redirect_uri', [''])[0]
             state = query_params.get('state', [''])[0]
@@ -202,6 +228,13 @@ class handler(BaseHTTPRequestHandler):
 
         # OAuth registration endpoint - generate new client credentials
         elif action == "register":
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+            self.end_headers()
+
             client_id, client_secret = generate_client_credentials()
             oauth_clients[client_id] = {
                 "client_secret": client_secret,
@@ -304,6 +337,9 @@ class handler(BaseHTTPRequestHandler):
             if auth_code not in auth_codes:
                 self.send_response(400)
                 self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
                 self.end_headers()
                 error_response = {"error": "invalid_grant", "error_description": "Invalid authorization code"}
                 self.wfile.write(json.dumps(error_response).encode())
@@ -313,6 +349,9 @@ class handler(BaseHTTPRequestHandler):
             if auth_data["client_id"] != client_id:
                 self.send_response(400)
                 self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
                 self.end_headers()
                 error_response = {"error": "invalid_grant", "error_description": "Client ID mismatch"}
                 self.wfile.write(json.dumps(error_response).encode())
@@ -328,6 +367,13 @@ class handler(BaseHTTPRequestHandler):
             # Clean up auth code
             del auth_codes[auth_code]
 
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+            self.end_headers()
+
             response = {
                 "access_token": access_token,
                 "token_type": "Bearer",
@@ -339,6 +385,13 @@ class handler(BaseHTTPRequestHandler):
             return
 
         # Default response
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+        self.end_headers()
+
         response = {
             "message": "Monarch Money MCP OAuth Server",
             "status": "active",
@@ -356,6 +409,14 @@ class handler(BaseHTTPRequestHandler):
         parsed_url = urlparse(path)
         query_params = parse_qs(parsed_url.query)
         action = query_params.get('action', [''])[0]
+
+        # Debug logging
+        import logging
+        logging.basicConfig(level=logging.INFO)
+        logger = logging.getLogger(__name__)
+        logger.info(f"OAuth POST request - path: {path}")
+        logger.info(f"OAuth POST action: {action}")
+        logger.info(f"POST query params: {query_params}")
 
         # Handle OAuth authorization form submission
         if action == "process":
@@ -474,6 +535,42 @@ class handler(BaseHTTPRequestHandler):
                 "expires_in": 3600,
                 "scope": "mcp:read mcp:write accounts:read transactions:read budgets:read",
                 "refresh_token": secrets.token_urlsafe(32)
+            }
+            self.wfile.write(json.dumps(response, indent=2).encode())
+            return
+
+        # Handle OAuth registration via POST (Claude Code may send POST)
+        elif action == "register":
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+            self.end_headers()
+
+            base_url = self.get_base_url()
+            client_id, client_secret = generate_client_credentials()
+            oauth_clients[client_id] = {
+                "client_secret": client_secret,
+                "redirect_uris": [
+                    "https://api.agent.ai/api/v3/mcp/flow/redirect",
+                    "https://agent.ai/oauth/callback",
+                    "https://claude.ai/oauth/callback",
+                    "https://claude.ai/api/mcp/auth_callback",
+                    f"{base_url}/callback",
+                    "http://localhost:3000/callback",
+                    "mcp://oauth/callback"
+                ],
+                "created_at": json.dumps({"timestamp": "2024-09-26T18:21:12Z"})
+            }
+
+            response = {
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "redirect_uris": oauth_clients[client_id]["redirect_uris"],
+                "grant_types": ["authorization_code"],
+                "response_types": ["code"],
+                "scope": "mcp:read mcp:write accounts:read transactions:read budgets:read"
             }
             self.wfile.write(json.dumps(response, indent=2).encode())
             return
