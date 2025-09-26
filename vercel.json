@@ -1,28 +1,11 @@
 {
-  "builds": [
-    {
-      "src": "api/*.py",
-      "use": "@vercel/python",
-      "config": {
-        "maxLambdaSize": "15mb"
-      }
-    }
-  ],
   "rewrites": [
     {
-      "source": "/",
-      "destination": "/api/home"
-    },
-    {
-      "source": "/api/auth/login",
+      "source": "/api/auth/(.*)",
       "destination": "/api/auth"
     },
     {
-      "source": "/api/auth/token",
-      "destination": "/api/auth"
-    },
-    {
-      "source": "/api/(accounts|transactions|budgets|spending-plan)",
+      "source": "/api/(.*)",
       "destination": "/api/index"
     }
   ],
