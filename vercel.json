@@ -30,6 +30,10 @@
       "destination": "/api/oauth-login"
     },
     {
+      "source": "/oauth/process",
+      "destination": "/api/oauth-working"
+    },
+    {
       "source": "/oauth/token",
       "destination": "/api/oauth-working"
     },

@@ -108,7 +108,7 @@ class handler(BaseHTTPRequestHandler):
             <strong>Requesting access to:</strong> Your Monarch Money financial data
         </div>
         {error_message}
-        <form method="post" action="/oauth/authorize">
+        <form method="post" action="/oauth/process">
             <input type="hidden" name="client_id" value="{client_id}">
             <input type="hidden" name="redirect_uri" value="{redirect_uri}">
             <input type="hidden" name="state" value="{state}">
