@@ -23,7 +23,7 @@ MONARCH_PASSWORD = os.getenv("MONARCH_PASSWORD")
 MONARCH_MFA_SECRET = os.getenv("MONARCH_MFA_SECRET")
 
 # Create the MCP server
-mcp = FastMCP("Monarch Money MCP", description="Access your Monarch Money financial data")
+mcp = FastMCP("Monarch Money MCP")
 
 async def get_monarch_client() -> MonarchMoney:
     """Create authenticated Monarch Money client"""
