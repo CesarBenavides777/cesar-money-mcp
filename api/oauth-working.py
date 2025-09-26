@@ -167,52 +167,50 @@ class handler(BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'text/html')
             self.end_headers()
 
-            login_form = f"""
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>Monarch Money MCP Authorization</title>
-                <style>
-                    body {{ font-family: Arial, sans-serif; max-width: 400px; margin: 100px auto; padding: 20px; }}
-                    .form-group {{ margin-bottom: 15px; }}
-                    label {{ display: block; margin-bottom: 5px; font-weight: bold; }}
-                    input {{ width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }}
-                    button {{ width: 100%; padding: 10px; background: #007cba; color: white; border: none; border-radius: 4px; cursor: pointer; }}
-                    button:hover {{ background: #005a87; }}
-                    .error {{ color: red; margin-top: 10px; }}
-                    .info {{ background: #f0f0f0; padding: 10px; border-radius: 4px; margin-bottom: 20px; }}
-                </style>
-            </head>
-            <body>
-                <h2>🏦 Monarch Money MCP Authorization</h2>
-                <div class="info">
-                    <strong>Client:</strong> {client_id}<br>
-                    <strong>Requesting access to:</strong> Your Monarch Money financial data
-                </div>
-                <form method="post" action="/oauth/authorize">
-                    <input type="hidden" name="client_id" value="{client_id}">
-                    <input type="hidden" name="redirect_uri" value="{redirect_uri}">
-                    <input type="hidden" name="state" value="{state}">
-                    <input type="hidden" name="response_type" value="code">
+            login_form = f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>Monarch Money MCP Authorization</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; max-width: 400px; margin: 100px auto; padding: 20px; }}
+        .form-group {{ margin-bottom: 15px; }}
+        label {{ display: block; margin-bottom: 5px; font-weight: bold; }}
+        input {{ width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }}
+        button {{ width: 100%; padding: 10px; background: #007cba; color: white; border: none; border-radius: 4px; cursor: pointer; }}
+        button:hover {{ background: #005a87; }}
+        .error {{ color: red; margin-top: 10px; }}
+        .info {{ background: #f0f0f0; padding: 10px; border-radius: 4px; margin-bottom: 20px; }}
+    </style>
+</head>
+<body>
+    <h2>🏦 Monarch Money MCP Authorization</h2>
+    <div class="info">
+        <strong>Client:</strong> {client_id}<br>
+        <strong>Requesting access to:</strong> Your Monarch Money financial data
+    </div>
+    <form method="post" action="/oauth/authorize">
+        <input type="hidden" name="client_id" value="{client_id}">
+        <input type="hidden" name="redirect_uri" value="{redirect_uri}">
+        <input type="hidden" name="state" value="{state}">
+        <input type="hidden" name="response_type" value="code">
 
-                    <div class="form-group">
-                        <label for="email">Monarch Money Email:</label>
-                        <input type="email" name="email" id="email" required>
-                    </div>
+        <div class="form-group">
+            <label for="email">Monarch Money Email:</label>
+            <input type="email" name="email" id="email" required>
+        </div>
 
-                    <div class="form-group">
-                        <label for="password">Monarch Money Password:</label>
-                        <input type="password" name="password" id="password" required>
-                    </div>
+        <div class="form-group">
+            <label for="password">Monarch Money Password:</label>
+            <input type="password" name="password" id="password" required>
+        </div>
 
-                    <button type="submit">Authorize Access</button>
-                </form>
-                <p style="font-size: 12px; color: #666; margin-top: 20px;">
-                    Your credentials are verified against your configured Monarch Money account and are not stored.
-                </p>
-            </body>
-            </html>
-            """
+        <button type="submit">Authorize Access</button>
+    </form>
+    <p style="font-size: 12px; color: #666; margin-top: 20px;">
+        Your credentials are verified against your configured Monarch Money account and are not stored.
+    </p>
+</body>
+</html>"""
             self.wfile.write(login_form.encode())
             return
 
@@ -316,55 +314,53 @@ class handler(BaseHTTPRequestHandler):
                 self.send_header('Content-Type', 'text/html')
                 self.end_headers()
 
-                error_form = f"""
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <title>Monarch Money MCP Authorization</title>
-                    <style>
-                        body {{ font-family: Arial, sans-serif; max-width: 400px; margin: 100px auto; padding: 20px; }}
-                        .form-group {{ margin-bottom: 15px; }}
-                        label {{ display: block; margin-bottom: 5px; font-weight: bold; }}
-                        input {{ width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }}
-                        button {{ width: 100%; padding: 10px; background: #007cba; color: white; border: none; border-radius: 4px; cursor: pointer; }}
-                        button:hover {{ background: #005a87; }}
-                        .error {{ color: red; margin-top: 10px; background: #ffebee; padding: 10px; border-radius: 4px; }}
-                        .info {{ background: #f0f0f0; padding: 10px; border-radius: 4px; margin-bottom: 20px; }}
-                    </style>
-                </head>
-                <body>
-                    <h2>🏦 Monarch Money MCP Authorization</h2>
-                    <div class="info">
-                        <strong>Client:</strong> {client_id}<br>
-                        <strong>Requesting access to:</strong> Your Monarch Money financial data
-                    </div>
-                    <div class="error">
-                        ❌ Invalid credentials. Please check your email and password.
-                    </div>
-                    <form method="post" action="/oauth/authorize">
-                        <input type="hidden" name="client_id" value="{client_id}">
-                        <input type="hidden" name="redirect_uri" value="{redirect_uri}">
-                        <input type="hidden" name="state" value="{state}">
-                        <input type="hidden" name="response_type" value="code">
+                error_form = f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>Monarch Money MCP Authorization</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; max-width: 400px; margin: 100px auto; padding: 20px; }}
+        .form-group {{ margin-bottom: 15px; }}
+        label {{ display: block; margin-bottom: 5px; font-weight: bold; }}
+        input {{ width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }}
+        button {{ width: 100%; padding: 10px; background: #007cba; color: white; border: none; border-radius: 4px; cursor: pointer; }}
+        button:hover {{ background: #005a87; }}
+        .error {{ color: red; margin-top: 10px; background: #ffebee; padding: 10px; border-radius: 4px; }}
+        .info {{ background: #f0f0f0; padding: 10px; border-radius: 4px; margin-bottom: 20px; }}
+    </style>
+</head>
+<body>
+    <h2>🏦 Monarch Money MCP Authorization</h2>
+    <div class="info">
+        <strong>Client:</strong> {client_id}<br>
+        <strong>Requesting access to:</strong> Your Monarch Money financial data
+    </div>
+    <div class="error">
+        ❌ Invalid credentials. Please check your email and password.
+    </div>
+    <form method="post" action="/oauth/authorize">
+        <input type="hidden" name="client_id" value="{client_id}">
+        <input type="hidden" name="redirect_uri" value="{redirect_uri}">
+        <input type="hidden" name="state" value="{state}">
+        <input type="hidden" name="response_type" value="code">
 
-                        <div class="form-group">
-                            <label for="email">Monarch Money Email:</label>
-                            <input type="email" name="email" id="email" value="{email}" required>
-                        </div>
+        <div class="form-group">
+            <label for="email">Monarch Money Email:</label>
+            <input type="email" name="email" id="email" value="{email}" required>
+        </div>
 
-                        <div class="form-group">
-                            <label for="password">Monarch Money Password:</label>
-                            <input type="password" name="password" id="password" required>
-                        </div>
+        <div class="form-group">
+            <label for="password">Monarch Money Password:</label>
+            <input type="password" name="password" id="password" required>
+        </div>
 
-                        <button type="submit">Authorize Access</button>
-                    </form>
-                    <p style="font-size: 12px; color: #666; margin-top: 20px;">
-                        Your credentials are verified against your configured Monarch Money account and are not stored.
-                    </p>
-                </body>
-                </html>
-                """
+        <button type="submit">Authorize Access</button>
+    </form>
+    <p style="font-size: 12px; color: #666; margin-top: 20px;">
+        Your credentials are verified against your configured Monarch Money account and are not stored.
+    </p>
+</body>
+</html>"""
                 self.wfile.write(error_form.encode())
                 return
 
