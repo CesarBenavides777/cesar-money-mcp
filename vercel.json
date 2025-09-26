@@ -27,7 +27,7 @@
     },
     {
       "source": "/mcp",
-      "destination": "/api/fastmcp"
+      "destination": "/api/mcp"
     },
     {
       "source": "/health",

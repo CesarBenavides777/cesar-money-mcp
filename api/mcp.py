@@ -137,16 +137,65 @@ async def handle_mcp_request(event: Dict[str, Any]) -> Dict[str, Any]:
             }
 
         elif method == "tools/list":
-            # Get tools from the MCP server
-            tools = await mcp_server._list_tools_handler()
+            # Return available tools directly
             result = {
                 "tools": [
                     {
-                        "name": tool.name,
-                        "description": tool.description,
-                        "inputSchema": tool.inputSchema
+                        "name": "get_accounts",
+                        "description": "Get all Monarch Money accounts with balances and details",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {},
+                            "required": []
+                        }
+                    },
+                    {
+                        "name": "get_transactions",
+                        "description": "Get Monarch Money transactions with optional filtering",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "start_date": {"type": "string", "description": "Start date in YYYY-MM-DD format"},
+                                "end_date": {"type": "string", "description": "End date in YYYY-MM-DD format"},
+                                "limit": {"type": "integer", "description": "Maximum number of transactions (default: 100, max: 500)", "default": 100},
+                                "account_id": {"type": "string", "description": "Optional account ID to filter transactions"}
+                            },
+                            "required": []
+                        }
+                    },
+                    {
+                        "name": "get_budgets",
+                        "description": "Get Monarch Money budget information and categories",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {},
+                            "required": []
+                        }
+                    },
+                    {
+                        "name": "get_spending_plan",
+                        "description": "Get spending plan for a specific month",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "month": {"type": "string", "description": "Month in YYYY-MM format (defaults to current month)"}
+                            },
+                            "required": []
+                        }
+                    },
+                    {
+                        "name": "get_account_history",
+                        "description": "Get balance history for a specific account",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "account_id": {"type": "string", "description": "Account ID to get history for"},
+                                "start_date": {"type": "string", "description": "Start date in YYYY-MM-DD format"},
+                                "end_date": {"type": "string", "description": "End date in YYYY-MM-DD format"}
+                            },
+                            "required": ["account_id"]
+                        }
                     }
-                    for tool in tools
                 ]
             }
 
@@ -158,16 +207,30 @@ async def handle_mcp_request(event: Dict[str, Any]) -> Dict[str, Any]:
             if not tool_name:
                 raise ValueError("Tool name is required")
 
+            # Call your FastMCP server functions directly
+            from fastmcp_server import get_accounts, get_transactions, get_budgets, get_spending_plan, get_account_history
+
+            tool_map = {
+                "get_accounts": get_accounts,
+                "get_transactions": get_transactions,
+                "get_budgets": get_budgets,
+                "get_spending_plan": get_spending_plan,
+                "get_account_history": get_account_history
+            }
+
+            if tool_name not in tool_map:
+                raise ValueError(f"Unknown tool: {tool_name}")
+
             # Execute the tool
-            tool_result = await mcp_server._call_tool_handler(tool_name, tool_args)
+            tool_func = tool_map[tool_name]
+            tool_result = await tool_func(**tool_args)
 
             result = {
                 "content": [
                     {
-                        "type": content.type,
-                        "text": content.text
+                        "type": "text",
+                        "text": str(tool_result)
                     }
-                    for content in tool_result
                 ]
             }
 
