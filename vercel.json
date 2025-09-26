@@ -5,8 +5,12 @@
       "destination": "/api/auth"
     },
     {
-      "source": "/api/(.*)",
+      "source": "/api/(accounts|transactions|budgets|spending-plan)",
       "destination": "/api/index"
+    },
+    {
+      "source": "/api",
+      "destination": "/api/mcp"
     }
   ],
   "headers": [
