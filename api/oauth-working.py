@@ -269,6 +269,31 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(response, indent=2).encode())
             return
 
+        # OAuth 2.0 Authorization Server Metadata endpoint (RFC 8414)
+        elif ".well-known/oauth-authorization-server" in path:
+            base_url = os.getenv("BASE_URL")
+            if not base_url:
+                host = self.headers.get('Host')
+                if host:
+                    protocol = 'http' if 'localhost' in host or '127.0.0.1' in host else 'https'
+                    base_url = f"{protocol}://{host}"
+                else:
+                    base_url = "https://cesar-money-mcp.vercel.app"
+
+            response = {
+                "issuer": base_url,
+                "authorization_endpoint": f"{base_url}/oauth/authorize",
+                "token_endpoint": f"{base_url}/oauth/token",
+                "registration_endpoint": f"{base_url}/oauth/register",
+                "grant_types_supported": ["authorization_code"],
+                "response_types_supported": ["code"],
+                "code_challenge_methods_supported": ["S256"],
+                "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
+                "scopes_supported": ["mcp:read", "mcp:write", "accounts:read", "transactions:read", "budgets:read"]
+            }
+            self.wfile.write(json.dumps(response, indent=2).encode())
+            return
+
         # Tool discovery endpoint
         elif "tools" in path or "capabilities" in path:
             response = {
@@ -278,7 +303,7 @@ class handler(BaseHTTPRequestHandler):
                     "name": "Monarch Money MCP Server",
                     "version": "1.0.0",
                     "description": "Access your Monarch Money financial data via MCP",
-                    "protocol_version": "2024-11-05"
+                    "protocol_version": "2025-06-18"
                 }
             }
             self.wfile.write(json.dumps(response, indent=2).encode())

@@ -18,9 +18,44 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class handler(BaseHTTPRequestHandler):
+    def check_authorization(self):
+        """Check if request is authorized - optional for this implementation"""
+        # For now, we'll allow unauthenticated access for testing
+        # In production, you'd validate Bearer tokens here
+        auth_header = self.headers.get('Authorization')
+        if auth_header and auth_header.startswith('Bearer '):
+            # Token validation would go here
+            return True
+        # Allow unauthenticated access for demo purposes
+        return True
+
+    def send_unauthorized(self):
+        """Send 401 Unauthorized with proper WWW-Authenticate header"""
+        base_url = os.getenv("BASE_URL")
+        if not base_url:
+            host = self.headers.get('Host')
+            if host:
+                protocol = 'http' if 'localhost' in host or '127.0.0.1' in host else 'https'
+                base_url = f"{protocol}://{host}"
+            else:
+                base_url = "https://cesar-money-mcp.vercel.app"
+
+        self.send_response(401)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('WWW-Authenticate', f'Bearer realm="MCP Server", resource="{base_url}/.well-known/oauth-protected-resource"')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+        self.end_headers()
+
     def do_POST(self):
         """Handle JSON-RPC requests"""
         try:
+            # Check authorization first (currently allows all for demo)
+            if not self.check_authorization():
+                self.send_unauthorized()
+                return
+
             # Set CORS headers
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
@@ -190,11 +225,16 @@ class handler(BaseHTTPRequestHandler):
                 response = {
                     "jsonrpc": "2.0",
                     "result": {
-                        "protocolVersion": "2024-11-05",
-                        "capabilities": {"tools": {}},
+                        "protocolVersion": "2025-06-18",
+                        "capabilities": {
+                            "tools": {
+                                "listChanged": False
+                            }
+                        },
                         "serverInfo": {
-                            "name": "monarchmoney-mcp",
-                            "version": "1.0.0"
+                            "name": "Monarch Money MCP Server",
+                            "version": "1.0.0",
+                            "description": "Access your Monarch Money financial data via MCP"
                         }
                     },
                     "id": request_id

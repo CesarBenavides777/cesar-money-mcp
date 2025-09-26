@@ -9,6 +9,8 @@ import asyncio
 from datetime import datetime, date
 from typing import List, Optional
 import logging
+import time
+import random
 
 from fastmcp import FastMCP
 from monarchmoney import MonarchMoney, RequireMFAException
@@ -24,6 +26,34 @@ MONARCH_MFA_SECRET = os.getenv("MONARCH_MFA_SECRET")
 
 # Create the MCP server
 mcp = FastMCP("Monarch Money MCP")
+
+async def retry_with_backoff(func, max_retries=5, base_delay=1.0, max_delay=60.0):
+    """Retry function with exponential backoff for rate limiting"""
+    for attempt in range(max_retries):
+        try:
+            return await func()
+        except Exception as e:
+            error_str = str(e).lower()
+
+            # Check if it's a rate limiting error
+            if "429" in error_str or "rate limit" in error_str or "too many requests" in error_str:
+                if attempt == max_retries - 1:
+                    logger.error(f"Max retries ({max_retries}) reached for rate limiting")
+                    raise e
+
+                # Calculate exponential backoff with jitter
+                delay = min(base_delay * (2 ** attempt), max_delay)
+                jitter = random.uniform(0.1, 0.5) * delay
+                total_delay = delay + jitter
+
+                logger.warning(f"Rate limited (attempt {attempt + 1}/{max_retries}), retrying in {total_delay:.2f}s")
+                await asyncio.sleep(total_delay)
+                continue
+            else:
+                # Non-rate-limiting error, don't retry
+                raise e
+
+    raise Exception("Max retries exceeded")
 
 async def get_monarch_client() -> MonarchMoney:
     """Create authenticated Monarch Money client"""
@@ -61,7 +91,10 @@ async def get_accounts() -> str:
         client = await get_monarch_client()
         logger.info("Client authenticated, fetching accounts...")
 
-        result = await client.get_accounts()
+        async def fetch_accounts():
+            return await client.get_accounts()
+
+        result = await retry_with_backoff(fetch_accounts)
         logger.info(f"Raw API response type: {type(result)}")
         logger.info(f"Raw API response keys: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}")
 
@@ -153,7 +186,11 @@ async def get_transactions(
             kwargs["account_id"] = account_id
 
         logger.info(f"Calling get_transactions with kwargs: {kwargs}")
-        result = await client.get_transactions(**kwargs)
+
+        async def fetch_transactions():
+            return await client.get_transactions(**kwargs)
+
+        result = await retry_with_backoff(fetch_transactions)
         transactions = result.get('allTransactions', {}).get('results', [])
 
         if not transactions:
@@ -196,7 +233,11 @@ async def get_budgets() -> str:
     """Get Monarch Money budget information and categories"""
     try:
         client = await get_monarch_client()
-        result = await client.get_budgets()
+
+        async def fetch_budgets():
+            return await client.get_budgets()
+
+        result = await retry_with_backoff(fetch_budgets)
 
         if not result:
             return "No budget information available."
@@ -245,7 +286,10 @@ async def get_spending_plan(month: Optional[str] = None) -> str:
             else:
                 end_date = date(now.year, now.month + 1, 1)
 
-        result = await client.get_spending_plan(start_date=start_date.isoformat(), end_date=end_date.isoformat())
+        async def fetch_spending_plan():
+            return await client.get_spending_plan(start_date=start_date.isoformat(), end_date=end_date.isoformat())
+
+        result = await retry_with_backoff(fetch_spending_plan)
 
         plan_text = f"📈 **Spending Plan for {start_date.strftime('%Y-%m')}**\n\n"
         plan_text += f"Plan data: {str(result)}\n"
@@ -282,11 +326,14 @@ async def get_account_history(
         if end_date:
             parsed_end = datetime.strptime(end_date, "%Y-%m-%d").date()
 
-        result = await client.get_account_history(
-            account_id=account_id,
-            start_date=parsed_start.isoformat() if parsed_start else None,
-            end_date=parsed_end.isoformat() if parsed_end else None
-        )
+        async def fetch_account_history():
+            return await client.get_account_history(
+                account_id=account_id,
+                start_date=parsed_start.isoformat() if parsed_start else None,
+                end_date=parsed_end.isoformat() if parsed_end else None
+            )
+
+        result = await retry_with_backoff(fetch_account_history)
 
         if not result:
             return f"No history found for account {account_id}"

@@ -100,12 +100,12 @@ class handler(BaseHTTPRequestHandler):
                 "name": "Monarch Money MCP Server",
                 "version": "1.0.0",
                 "description": "Access your Monarch Money financial data via MCP",
-                "protocol_version": "2024-11-05",
+                "protocol_version": "2025-06-18",
                 "server_info": {
                     "name": "Monarch Money MCP Server",
                     "version": "1.0.0",
                     "description": "Access your Monarch Money financial data via MCP",
-                    "protocol_version": "2024-11-05"
+                    "protocol_version": "2025-06-18"
                 },
                 "capabilities": {
                     "tools": {
