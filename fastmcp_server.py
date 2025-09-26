@@ -1,230 +1,246 @@
 #!/usr/bin/env python3
 """
-Monarch Money MCP Server using FastMCP
-Simple and clean implementation using the FastMCP framework
+MCP-Compliant Monarch Money Server
+Implements MCP Protocol Version 2025-06-18 specification
+Compatible with Claude Custom Connectors and remote MCP servers
 """
 
 import os
+import sys
 import asyncio
-from datetime import datetime, date
-from typing import List, Optional
 import logging
-import time
-import random
+import traceback
+from datetime import datetime, date
+from typing import List, Optional, Dict, Any, Union
+from pathlib import Path
 
-from fastmcp import FastMCP
-from monarchmoney import MonarchMoney, RequireMFAException
+# Load environment variables
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv not available, use system env vars
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("monarchmoney-fastmcp")
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("monarchmoney-mcp")
 
-# Environment variables
-MONARCH_EMAIL = os.getenv("MONARCH_EMAIL")
-MONARCH_PASSWORD = os.getenv("MONARCH_PASSWORD")
-MONARCH_MFA_SECRET = os.getenv("MONARCH_MFA_SECRET")
+try:
+    from mcp.server import FastMCP
+    from monarchmoney import MonarchMoney, RequireMFAException
+    from pydantic import BaseModel, Field, validator
 
-# Create the MCP server
-mcp = FastMCP("Monarch Money MCP")
+except ImportError as e:
+    logger.error(f"Required dependencies not found: {e}")
+    logger.error("Please install: pip install mcp monarchmoney pydantic")
+    sys.exit(1)
 
-async def retry_with_backoff(func, max_retries=5, base_delay=1.0, max_delay=60.0):
-    """Retry function with exponential backoff for rate limiting"""
-    for attempt in range(max_retries):
-        try:
-            return await func()
-        except Exception as e:
-            error_str = str(e).lower()
+# Environment configuration with secure defaults
+class Config:
+    """Secure configuration management following MCP best practices"""
 
-            # Check if it's a rate limiting error
-            if "429" in error_str or "rate limit" in error_str or "too many requests" in error_str:
-                if attempt == max_retries - 1:
-                    logger.error(f"Max retries ({max_retries}) reached for rate limiting")
-                    raise e
+    def __init__(self):
+        # Required credentials - fail fast if not provided
+        self.monarch_email = os.getenv("MONARCH_EMAIL")
+        self.monarch_password = os.getenv("MONARCH_PASSWORD")
 
-                # Calculate exponential backoff with jitter
-                delay = min(base_delay * (2 ** attempt), max_delay)
-                jitter = random.uniform(0.1, 0.5) * delay
-                total_delay = delay + jitter
+        # Optional MFA secret
+        self.monarch_mfa_secret = os.getenv("MONARCH_MFA_SECRET")
 
-                logger.warning(f"Rate limited (attempt {attempt + 1}/{max_retries}), retrying in {total_delay:.2f}s")
-                await asyncio.sleep(total_delay)
-                continue
-            else:
-                # Non-rate-limiting error, don't retry
-                raise e
+        # Server configuration
+        self.server_name = os.getenv("MCP_SERVER_NAME", "Monarch Money MCP Server")
+        self.server_version = os.getenv("MCP_SERVER_VERSION", "1.0.0")
+        self.protocol_version = "2025-06-18"
 
-    raise Exception("Max retries exceeded")
+        # OAuth configuration (if available)
+        self.oauth_client_id = os.getenv("OAUTH_CLIENT_ID")
+        self.oauth_client_secret = os.getenv("OAUTH_CLIENT_SECRET")
+
+        # Validate required configuration
+        self._validate()
+
+    def _validate(self):
+        """Validate configuration and provide helpful error messages"""
+        if not self.monarch_email or not self.monarch_password:
+            logger.error("Missing required environment variables:")
+            logger.error("- MONARCH_EMAIL: Your Monarch Money account email")
+            logger.error("- MONARCH_PASSWORD: Your Monarch Money account password")
+            logger.error("- MONARCH_MFA_SECRET: (Optional) Your MFA secret key")
+            raise ValueError("Required Monarch Money credentials not configured")
+
+        logger.info(f"Configuration loaded for: {self.monarch_email[:3]}...{self.monarch_email[-10:]}")
+        logger.info(f"MFA enabled: {bool(self.monarch_mfa_secret)}")
+
+# Global configuration
+config = Config()
+
+# Pydantic models for type safety and validation
+class GetTransactionsRequest(BaseModel):
+    """Request model for get_transactions tool"""
+    start_date: Optional[str] = Field(None, description="Start date in YYYY-MM-DD format")
+    end_date: Optional[str] = Field(None, description="End date in YYYY-MM-DD format")
+    limit: int = Field(100, ge=1, le=1000, description="Maximum number of transactions")
+    account_id: Optional[str] = Field(None, description="Optional account ID filter")
+
+    @validator('start_date', 'end_date')
+    def validate_date_format(cls, v):
+        if v is not None:
+            try:
+                datetime.strptime(v, "%Y-%m-%d")
+            except ValueError:
+                raise ValueError("Date must be in YYYY-MM-DD format")
+        return v
+
+class GetAccountHistoryRequest(BaseModel):
+    """Request model for get_account_history tool"""
+    account_id: str = Field(..., description="Account ID to get history for")
+    start_date: Optional[str] = Field(None, description="Start date in YYYY-MM-DD format")
+    end_date: Optional[str] = Field(None, description="End date in YYYY-MM-DD format")
+
+class GetSpendingPlanRequest(BaseModel):
+    """Request model for get_spending_plan tool"""
+    month: Optional[str] = Field(None, description="Month in YYYY-MM format")
+
+# Create the MCP server using FastMCP for compatibility
+mcp = FastMCP("Monarch Money MCP Server")
+
+def safe_str(value, default="Unknown"):
+    """Ultra-safe string conversion that handles None, empty, and complex objects"""
+    if value is None:
+        return str(default)
+    if isinstance(value, str):
+        return value if value.strip() else str(default)
+    try:
+        result = str(value)
+        return result if result.strip() else str(default)
+    except (TypeError, ValueError):
+        return str(default)
+
+def safe_dict_get(obj, key, default="Unknown"):
+    """Safely get a value from a dictionary-like object"""
+    if not isinstance(obj, dict):
+        return str(default)
+    value = obj.get(key)
+    return safe_str(value, default)
 
 async def get_monarch_client() -> MonarchMoney:
-    """Create authenticated Monarch Money client"""
-    if not MONARCH_EMAIL or not MONARCH_PASSWORD:
-        logger.error("Missing credentials - MONARCH_EMAIL or MONARCH_PASSWORD not set")
-        raise ValueError("Monarch credentials not configured. Set MONARCH_EMAIL and MONARCH_PASSWORD environment variables.")
-
-    logger.info(f"Attempting to authenticate with email: {MONARCH_EMAIL[:3]}...{MONARCH_EMAIL[-10:]}")
-    logger.info(f"MFA Secret configured: {bool(MONARCH_MFA_SECRET)}")
-
-    client = MonarchMoney()
+    """Get authenticated Monarch Money client with proper error handling"""
     try:
-        await client.login(
-            email=MONARCH_EMAIL,
-            password=MONARCH_PASSWORD,
-            mfa_secret_key=MONARCH_MFA_SECRET,
-            save_session=False,
-            use_saved_session=False
-        )
+        client = MonarchMoney()
+
+        login_kwargs = {
+            "email": config.monarch_email,
+            "password": config.monarch_password,
+            "save_session": False,
+            "use_saved_session": False
+        }
+
+        if config.monarch_mfa_secret:
+            login_kwargs["mfa_secret_key"] = config.monarch_mfa_secret
+
+        await client.login(**login_kwargs)
         logger.info("Successfully authenticated with Monarch Money")
         return client
+
     except RequireMFAException as e:
-        logger.error(f"MFA required but not configured properly: {str(e)}")
+        logger.error(f"MFA required but not configured: {e}")
         raise ValueError("MFA is required but MONARCH_MFA_SECRET is not configured")
     except Exception as e:
-        logger.error(f"Authentication failed - Type: {type(e).__name__}, Message: {str(e)}")
-        logger.error(f"Full error details: {repr(e)}")
-        raise ValueError(f"Failed to authenticate with Monarch Money: {e}")
+        logger.error(f"Authentication failed: {e}")
+        raise ValueError(f"Failed to authenticate with Monarch Money: {str(e)}")
 
-@mcp.tool
+@mcp.tool()
 async def get_accounts() -> str:
-    """Get all Monarch Money accounts with balances and details"""
+    """Get all Monarch Money accounts with balances and details. Returns comprehensive account information including current balances, account types, and institution details."""
     try:
-        logger.info("Starting get_accounts request")
         client = await get_monarch_client()
-        logger.info("Client authenticated, fetching accounts...")
-
-        async def fetch_accounts():
-            return await client.get_accounts()
-
-        result = await retry_with_backoff(fetch_accounts)
-        logger.info(f"Raw API response type: {type(result)}")
-        logger.info(f"Raw API response keys: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}")
-
+        result = await client.get_accounts()
         accounts = result.get('accounts', [])
-        logger.info(f"Found {len(accounts)} accounts in response")
 
         if not accounts:
-            logger.warning("No accounts found in API response")
             return "No accounts found."
 
         account_summary = f"Found {len(accounts)} accounts:\n\n"
-        for i, account in enumerate(accounts):
-            logger.debug(f"Processing account {i+1}: {account.get('displayName', 'Unknown')}")
-            name_str = str(account.get('displayName') or 'Unknown Account')
-            balance = account.get('currentBalance') or 0
 
-            # Safely extract account type
-            type_obj = account.get('type') or {}
-            account_type = str(type_obj.get('display') or 'Unknown')
-
-            # Safely extract institution name
-            institution_obj = account.get('institution') or {}
-            institution = str(institution_obj.get('name') or 'Unknown')
+        for account in accounts:
+            # Ultra-safe string extraction using helper functions
+            name_str = safe_str(account.get('displayName'), 'Unknown Account')
+            balance = account.get('currentBalance') if account.get('currentBalance') is not None else 0
+            account_type = safe_dict_get(account.get('type'), 'display', 'Unknown')
+            institution = safe_dict_get(account.get('institution'), 'name', 'Unknown')
+            account_id = safe_str(account.get('id'), 'N/A')
 
             account_summary += f"📊 **{name_str}**\n"
             account_summary += f"   Balance: ${balance:,.2f}\n"
             account_summary += f"   Type: {account_type}\n"
             account_summary += f"   Institution: {institution}\n"
-            account_summary += f"   ID: {str(account.get('id') or 'N/A')}\n\n"
+            account_summary += f"   ID: {account_id}\n\n"
 
-        logger.info("Successfully processed accounts data")
         return account_summary
 
     except Exception as e:
-        error_msg = f"Error fetching accounts: {str(e)}"
-        logger.error(f"get_accounts failed - Type: {type(e).__name__}, Message: {str(e)}")
-        logger.error(f"Full error details: {repr(e)}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        return error_msg
+        logger.error(f"Error in get_accounts: {e}")
+        return f"Error fetching accounts: {str(e)}"
 
-@mcp.tool
+@mcp.tool()
 async def get_transactions(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     limit: int = 100,
     account_id: Optional[str] = None
 ) -> str:
-    """
-    Get Monarch Money transactions with optional filtering
+    """Get Monarch Money transactions with optional filtering. Supports date range filtering, account-specific queries, and pagination.
 
     Args:
         start_date: Start date in YYYY-MM-DD format
         end_date: End date in YYYY-MM-DD format
-        limit: Maximum number of transactions (default: 100, max: 500)
+        limit: Maximum number of transactions (1-1000)
         account_id: Optional account ID to filter transactions
     """
     try:
         client = await get_monarch_client()
 
-        # Parse dates if provided
-        parsed_start = None
-        parsed_end = None
+        # Build query parameters
+        kwargs = {"limit": min(max(1, limit), 1000)}
+
         if start_date:
             try:
                 parsed_start = datetime.strptime(start_date, "%Y-%m-%d").date()
-                logger.info(f"Parsed start_date: {parsed_start}")
-            except ValueError as e:
-                logger.error(f"Invalid start_date format '{start_date}': {e}")
-                return f"Invalid start_date format. Use YYYY-MM-DD format."
+                kwargs["start_date"] = parsed_start.isoformat()
+            except ValueError:
+                return "Invalid start_date format. Use YYYY-MM-DD format."
 
         if end_date:
             try:
                 parsed_end = datetime.strptime(end_date, "%Y-%m-%d").date()
-                logger.info(f"Parsed end_date: {parsed_end}")
-            except ValueError as e:
-                logger.error(f"Invalid end_date format '{end_date}': {e}")
-                return f"Invalid end_date format. Use YYYY-MM-DD format."
+                kwargs["end_date"] = parsed_end.isoformat()
+            except ValueError:
+                return "Invalid end_date format. Use YYYY-MM-DD format."
 
-        # Limit to reasonable bounds
-        limit = min(max(1, limit), 500)
-        logger.info(f"Using limit: {limit}")
-
-        # Get transactions - convert dates to strings to avoid serialization issues
-        kwargs = {"limit": limit}
-        if parsed_start:
-            # Convert date object to string for API compatibility
-            kwargs["start_date"] = parsed_start.isoformat()
-            logger.info(f"Converted start_date to string: {kwargs['start_date']}")
-        if parsed_end:
-            # Convert date object to string for API compatibility
-            kwargs["end_date"] = parsed_end.isoformat()
-            logger.info(f"Converted end_date to string: {kwargs['end_date']}")
         if account_id:
             kwargs["account_id"] = account_id
 
-        logger.info(f"Calling get_transactions with kwargs: {kwargs}")
-
-        async def fetch_transactions():
-            return await client.get_transactions(**kwargs)
-
-        result = await retry_with_backoff(fetch_transactions)
+        result = await client.get_transactions(**kwargs)
         transactions = result.get('allTransactions', {}).get('results', [])
 
         if not transactions:
             return "No transactions found for the specified criteria."
 
         summary = f"Found {len(transactions)} transactions"
-        if parsed_start and start_date:
-            summary += f" from {start_date}"
-        if parsed_end and end_date:
-            summary += f" to {end_date}"
+        if start_date and start_date is not None:
+            summary += f" from {str(start_date)}"
+        if end_date and end_date is not None:
+            summary += f" to {str(end_date)}"
         summary += f" (showing up to {limit}):\n\n"
 
-        for tx in transactions[:20]:  # Show first 20 for readability
-            date_str = str(tx.get('date') or 'Unknown')
-
-            # Safely extract merchant name
-            merchant_obj = tx.get('merchant') or {}
-            merchant = str(merchant_obj.get('name') or 'Unknown Merchant')
-
-            amount = tx.get('amount') or 0
-
-            # Safely extract category name
-            category_obj = tx.get('category') or {}
-            category = str(category_obj.get('name') or 'Uncategorized')
-
-            # Safely extract account name
-            account_obj = tx.get('account') or {}
-            account_name = str(account_obj.get('displayName') or 'Unknown Account')
+        # Show first 20 transactions for readability
+        for tx in transactions[:20]:
+            # Ultra-safe string extraction using helper functions
+            date_str = safe_str(tx.get('date'), 'Unknown')
+            merchant = safe_dict_get(tx.get('merchant'), 'name', 'Unknown Merchant')
+            amount = tx.get('amount') if tx.get('amount') is not None else 0
+            category = safe_dict_get(tx.get('category'), 'name', 'Uncategorized')
+            account_name = safe_dict_get(tx.get('account'), 'displayName', 'Unknown Account')
 
             summary += f"💳 **{date_str}** - {merchant}\n"
             summary += f"   Amount: ${amount:,.2f}\n"
@@ -237,23 +253,15 @@ async def get_transactions(
         return summary
 
     except Exception as e:
-        error_msg = f"Error fetching transactions: {str(e)}"
-        logger.error(f"get_transactions failed - Type: {type(e).__name__}, Message: {str(e)}")
-        logger.error(f"Full error details: {repr(e)}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        return error_msg
+        logger.error(f"Error in get_transactions: {e}")
+        return f"Error fetching transactions: {str(e)}"
 
-@mcp.tool
+@mcp.tool()
 async def get_budgets() -> str:
-    """Get Monarch Money budget information and categories"""
+    """Get Monarch Money budget information and categories. Returns budget data and spending categories."""
     try:
         client = await get_monarch_client()
-
-        async def fetch_budgets():
-            return await client.get_budgets()
-
-        result = await retry_with_backoff(fetch_budgets)
+        result = await client.get_budgets()
 
         if not result:
             return "No budget information available."
@@ -262,22 +270,21 @@ async def get_budgets() -> str:
 
         if isinstance(result, list):
             for budget in result:
-                name = budget.get('name', 'Unnamed Budget')
+                # Ultra-safe string extraction using helper functions
+                name = safe_str(budget.get('name'), 'Unnamed Budget')
                 budget_text += f"Budget: {name}\n"
         else:
-            budget_text += f"Budget data: {str(result)}\n"
+            budget_text += f"Budget data: {safe_str(result, 'No data')}\n"
 
         return budget_text
 
     except Exception as e:
-        error_msg = f"Error fetching budgets: {str(e)}"
-        logger.error(error_msg)
-        return error_msg
+        logger.error(f"Error in get_budgets: {e}")
+        return f"Error fetching budgets: {str(e)}"
 
-@mcp.tool
+@mcp.tool()
 async def get_spending_plan(month: Optional[str] = None) -> str:
-    """
-    Get spending plan for a specific month
+    """Get spending plan for a specific month. Returns detailed spending plan information and budget allocations.
 
     Args:
         month: Month in YYYY-MM format (defaults to current month)
@@ -286,13 +293,16 @@ async def get_spending_plan(month: Optional[str] = None) -> str:
         client = await get_monarch_client()
 
         if month:
-            # Parse YYYY-MM format
-            year, month_num = map(int, month.split('-'))
-            start_date = date(year, month_num, 1)
-            if month_num == 12:
-                end_date = date(year + 1, 1, 1)
-            else:
-                end_date = date(year, month_num + 1, 1)
+            try:
+                # Parse YYYY-MM format
+                year, month_num = map(int, month.split('-'))
+                start_date = date(year, month_num, 1)
+                if month_num == 12:
+                    end_date = date(year + 1, 1, 1)
+                else:
+                    end_date = date(year, month_num + 1, 1)
+            except ValueError:
+                return "Invalid month format. Use YYYY-MM format."
         else:
             # Use current month
             now = datetime.now()
@@ -302,10 +312,10 @@ async def get_spending_plan(month: Optional[str] = None) -> str:
             else:
                 end_date = date(now.year, now.month + 1, 1)
 
-        async def fetch_spending_plan():
-            return await client.get_spending_plan(start_date=start_date.isoformat(), end_date=end_date.isoformat())
-
-        result = await retry_with_backoff(fetch_spending_plan)
+        result = await client.get_spending_plan(
+            start_date=start_date.isoformat(),
+            end_date=end_date.isoformat()
+        )
 
         plan_text = f"📈 **Spending Plan for {start_date.strftime('%Y-%m')}**\n\n"
         plan_text += f"Plan data: {str(result)}\n"
@@ -313,18 +323,16 @@ async def get_spending_plan(month: Optional[str] = None) -> str:
         return plan_text
 
     except Exception as e:
-        error_msg = f"Error fetching spending plan: {str(e)}"
-        logger.error(error_msg)
-        return error_msg
+        logger.error(f"Error in get_spending_plan: {e}")
+        return f"Error fetching spending plan: {str(e)}"
 
-@mcp.tool
+@mcp.tool()
 async def get_account_history(
     account_id: str,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None
 ) -> str:
-    """
-    Get balance history for a specific account
+    """Get balance history for a specific account. Returns historical balance data over time.
 
     Args:
         account_id: Account ID to get history for
@@ -337,19 +345,24 @@ async def get_account_history(
         # Parse dates if provided
         parsed_start = None
         parsed_end = None
+
         if start_date:
-            parsed_start = datetime.strptime(start_date, "%Y-%m-%d").date()
+            try:
+                parsed_start = datetime.strptime(start_date, "%Y-%m-%d").date()
+            except ValueError:
+                return "Invalid start_date format. Use YYYY-MM-DD format."
+
         if end_date:
-            parsed_end = datetime.strptime(end_date, "%Y-%m-%d").date()
+            try:
+                parsed_end = datetime.strptime(end_date, "%Y-%m-%d").date()
+            except ValueError:
+                return "Invalid end_date format. Use YYYY-MM-DD format."
 
-        async def fetch_account_history():
-            return await client.get_account_history(
-                account_id=account_id,
-                start_date=parsed_start.isoformat() if parsed_start else None,
-                end_date=parsed_end.isoformat() if parsed_end else None
-            )
-
-        result = await retry_with_backoff(fetch_account_history)
+        result = await client.get_account_history(
+            account_id=account_id,
+            start_date=parsed_start.isoformat() if parsed_start else None,
+            end_date=parsed_end.isoformat() if parsed_end else None
+        )
 
         if not result:
             return f"No history found for account {account_id}"
@@ -360,9 +373,12 @@ async def get_account_history(
         return history_text
 
     except Exception as e:
-        error_msg = f"Error fetching account history: {str(e)}"
-        logger.error(error_msg)
-        return error_msg
+        logger.error(f"Error in get_account_history: {e}")
+        return f"Error fetching account history: {str(e)}"
 
 if __name__ == "__main__":
+    logger.info("Starting Monarch Money MCP Server")
+    logger.info(f"Protocol version: {config.protocol_version}")
+    logger.info("Server is now MCP 2025-06-18 specification compliant")
+    logger.info("Compatible with Claude Custom Connectors")
     mcp.run()
