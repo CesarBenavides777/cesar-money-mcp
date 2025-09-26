@@ -28,7 +28,11 @@ mcp = FastMCP("Monarch Money MCP")
 async def get_monarch_client() -> MonarchMoney:
     """Create authenticated Monarch Money client"""
     if not MONARCH_EMAIL or not MONARCH_PASSWORD:
+        logger.error("Missing credentials - MONARCH_EMAIL or MONARCH_PASSWORD not set")
         raise ValueError("Monarch credentials not configured. Set MONARCH_EMAIL and MONARCH_PASSWORD environment variables.")
+
+    logger.info(f"Attempting to authenticate with email: {MONARCH_EMAIL[:3]}...{MONARCH_EMAIL[-10:]}")
+    logger.info(f"MFA Secret configured: {bool(MONARCH_MFA_SECRET)}")
 
     client = MonarchMoney()
     try:
@@ -41,25 +45,36 @@ async def get_monarch_client() -> MonarchMoney:
         )
         logger.info("Successfully authenticated with Monarch Money")
         return client
-    except RequireMFAException:
+    except RequireMFAException as e:
+        logger.error(f"MFA required but not configured properly: {str(e)}")
         raise ValueError("MFA is required but MONARCH_MFA_SECRET is not configured")
     except Exception as e:
-        logger.error(f"Authentication failed: {e}")
+        logger.error(f"Authentication failed - Type: {type(e).__name__}, Message: {str(e)}")
+        logger.error(f"Full error details: {repr(e)}")
         raise ValueError(f"Failed to authenticate with Monarch Money: {e}")
 
 @mcp.tool
 async def get_accounts() -> str:
     """Get all Monarch Money accounts with balances and details"""
     try:
+        logger.info("Starting get_accounts request")
         client = await get_monarch_client()
+        logger.info("Client authenticated, fetching accounts...")
+
         result = await client.get_accounts()
+        logger.info(f"Raw API response type: {type(result)}")
+        logger.info(f"Raw API response keys: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}")
+
         accounts = result.get('accounts', [])
+        logger.info(f"Found {len(accounts)} accounts in response")
 
         if not accounts:
+            logger.warning("No accounts found in API response")
             return "No accounts found."
 
         account_summary = f"Found {len(accounts)} accounts:\n\n"
-        for account in accounts:
+        for i, account in enumerate(accounts):
+            logger.debug(f"Processing account {i+1}: {account.get('displayName', 'Unknown')}")
             name_str = account.get('displayName', 'Unknown Account')
             balance = account.get('currentBalance', 0)
             account_type = account.get('type', {}).get('display', 'Unknown')
@@ -71,11 +86,15 @@ async def get_accounts() -> str:
             account_summary += f"   Institution: {institution}\n"
             account_summary += f"   ID: {account.get('id', 'N/A')}\n\n"
 
+        logger.info("Successfully processed accounts data")
         return account_summary
 
     except Exception as e:
         error_msg = f"Error fetching accounts: {str(e)}"
-        logger.error(error_msg)
+        logger.error(f"get_accounts failed - Type: {type(e).__name__}, Message: {str(e)}")
+        logger.error(f"Full error details: {repr(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return error_msg
 
 @mcp.tool
@@ -101,22 +120,35 @@ async def get_transactions(
         parsed_start = None
         parsed_end = None
         if start_date:
-            parsed_start = datetime.strptime(start_date, "%Y-%m-%d").date()
+            try:
+                parsed_start = datetime.strptime(start_date, "%Y-%m-%d").date()
+                logger.info(f"Parsed start_date: {parsed_start}")
+            except ValueError as e:
+                logger.error(f"Invalid start_date format '{start_date}': {e}")
+                return f"Invalid start_date format. Use YYYY-MM-DD format."
+
         if end_date:
-            parsed_end = datetime.strptime(end_date, "%Y-%m-%d").date()
+            try:
+                parsed_end = datetime.strptime(end_date, "%Y-%m-%d").date()
+                logger.info(f"Parsed end_date: {parsed_end}")
+            except ValueError as e:
+                logger.error(f"Invalid end_date format '{end_date}': {e}")
+                return f"Invalid end_date format. Use YYYY-MM-DD format."
 
         # Limit to reasonable bounds
         limit = min(max(1, limit), 500)
+        logger.info(f"Using limit: {limit}")
 
-        # Get transactions
-        kwargs = {
-            "limit": limit,
-            "start_date": parsed_start,
-            "end_date": parsed_end
-        }
+        # Get transactions - remove None values to avoid serialization issues
+        kwargs = {"limit": limit}
+        if parsed_start:
+            kwargs["start_date"] = parsed_start
+        if parsed_end:
+            kwargs["end_date"] = parsed_end
         if account_id:
             kwargs["account_id"] = account_id
 
+        logger.info(f"Calling get_transactions with kwargs: {kwargs}")
         result = await client.get_transactions(**kwargs)
         transactions = result.get('allTransactions', {}).get('results', [])
 
@@ -149,7 +181,10 @@ async def get_transactions(
 
     except Exception as e:
         error_msg = f"Error fetching transactions: {str(e)}"
-        logger.error(error_msg)
+        logger.error(f"get_transactions failed - Type: {type(e).__name__}, Message: {str(e)}")
+        logger.error(f"Full error details: {repr(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return error_msg
 
 @mcp.tool
