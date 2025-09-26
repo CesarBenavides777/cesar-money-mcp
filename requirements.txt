@@ -1,3 +1,4 @@
 monarchmoney>=0.1.15
 PyJWT>=2.8.0
 fastmcp
+gql<4.0.0
