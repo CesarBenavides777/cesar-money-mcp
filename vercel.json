@@ -50,7 +50,11 @@
       "destination": "/api/index"
     },
     {
-      "source": "/api",
+      "source": "/$",
+      "destination": "/api/mcp-discovery"
+    },
+    {
+      "source": "/api$",
       "destination": "/api/mcp"
     }
   ],

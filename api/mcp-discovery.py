@@ -6,117 +6,138 @@ Provides server capabilities and OAuth endpoints for MCP client discovery
 import json
 import os
 import logging
+from http.server import BaseHTTPRequestHandler
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def handler(event, context):
-    """Handle MCP server discovery requests"""
-    try:
-        headers = {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization"
+# Available MCP tools
+AVAILABLE_TOOLS = [
+    {
+        "name": "get_accounts",
+        "description": "Get all Monarch Money accounts with balances and details",
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "required": []
         }
+    },
+    {
+        "name": "get_transactions",
+        "description": "Get Monarch Money transactions with optional filtering",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "start_date": {"type": "string", "description": "Start date in YYYY-MM-DD format"},
+                "end_date": {"type": "string", "description": "End date in YYYY-MM-DD format"},
+                "limit": {"type": "integer", "description": "Maximum number of transactions (default: 100, max: 500)", "default": 100},
+                "account_id": {"type": "string", "description": "Optional account ID to filter transactions"}
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "get_budgets",
+        "description": "Get Monarch Money budget information and categories",
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    },
+    {
+        "name": "get_spending_plan",
+        "description": "Get spending plan for a specific month",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "month": {"type": "string", "description": "Month in YYYY-MM format (defaults to current month)"}
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "get_account_history",
+        "description": "Get balance history for a specific account",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "account_id": {"type": "string", "description": "Account ID to get history for"},
+                "start_date": {"type": "string", "description": "Start date in YYYY-MM-DD format"},
+                "end_date": {"type": "string", "description": "End date in YYYY-MM-DD format"}
+            },
+            "required": ["account_id"]
+        }
+    }
+]
 
-        # Handle preflight
-        if event.get("httpMethod") == "OPTIONS":
-            return {
-                "statusCode": 200,
-                "headers": headers,
-                "body": ""
+class handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        """Handle MCP server discovery requests"""
+        try:
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+            self.end_headers()
+
+            # MCP server discovery response
+            base_url = "https://cesar-money-mcp.vercel.app"
+
+            discovery_response = {
+                "server_info": {
+                    "name": "Monarch Money MCP Server",
+                    "version": "1.0.0",
+                    "description": "Access your Monarch Money financial data via MCP",
+                    "protocol_version": "2024-11-05"
+                },
+                "capabilities": {
+                    "tools": {
+                        "list_changed": False
+                    },
+                    "resources": {},
+                    "prompts": {}
+                },
+                "oauth": {
+                    "authorization_endpoint": f"{base_url}/oauth/authorize",
+                    "token_endpoint": f"{base_url}/oauth/token",
+                    "registration_endpoint": f"{base_url}/oauth/register",
+                    "grant_types_supported": ["authorization_code"],
+                    "response_types_supported": ["code"],
+                    "scopes_supported": ["mcp:read", "mcp:write"],
+                    "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"]
+                },
+                "endpoints": {
+                    "mcp": f"{base_url}/api",
+                    "tools": f"{base_url}/tools/call",
+                    "oauth_register": f"{base_url}/oauth/register",
+                    "oauth_authorize": f"{base_url}/oauth/authorize",
+                    "oauth_token": f"{base_url}/oauth/token"
+                },
+                "tools": AVAILABLE_TOOLS
             }
 
-        # MCP server discovery response
-        base_url = "https://cesar-money-mcp.vercel.app"
+            self.wfile.write(json.dumps(discovery_response, indent=2).encode())
 
-        discovery_response = {
-            "server_info": {
-                "name": "Monarch Money MCP Server",
-                "version": "1.0.0",
-                "description": "Access your Monarch Money financial data via MCP",
-                "protocol_version": "2024-11-05"
-            },
-            "capabilities": {
-                "tools": {
-                    "list_changed": False
-                },
-                "resources": {},
-                "prompts": {}
-            },
-            "oauth": {
-                "authorization_endpoint": f"{base_url}/oauth/authorize",
-                "token_endpoint": f"{base_url}/oauth/token",
-                "registration_endpoint": f"{base_url}/oauth/register",
-                "grant_types_supported": ["authorization_code"],
-                "response_types_supported": ["code"],
-                "scopes_supported": ["mcp:read", "mcp:write"],
-                "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"]
-            },
-            "endpoints": {
-                "mcp": f"{base_url}/api",
-                "tools": f"{base_url}/tools/call",
-                "oauth_register": f"{base_url}/oauth/register",
-                "oauth_authorize": f"{base_url}/oauth/authorize",
-                "oauth_token": f"{base_url}/oauth/token"
-            },
-            "tools": [
-                {
-                    "name": "get_accounts",
-                    "description": "Get all Monarch Money accounts with balances",
-                    "parameters": {
-                        "access_token": {
-                            "type": "string",
-                            "description": "OAuth access token",
-                            "required": True
-                        }
-                    }
-                },
-                {
-                    "name": "get_transactions",
-                    "description": "Get Monarch Money transactions with filtering",
-                    "parameters": {
-                        "access_token": {
-                            "type": "string",
-                            "description": "OAuth access token",
-                            "required": True
-                        },
-                        "start_date": {
-                            "type": "string",
-                            "description": "Start date in YYYY-MM-DD format",
-                            "required": False
-                        },
-                        "end_date": {
-                            "type": "string",
-                            "description": "End date in YYYY-MM-DD format",
-                            "required": False
-                        },
-                        "limit": {
-                            "type": "integer",
-                            "description": "Maximum transactions to return",
-                            "required": False,
-                            "default": 100
-                        }
-                    }
-                }
-            ]
-        }
-
-        return {
-            "statusCode": 200,
-            "headers": headers,
-            "body": json.dumps(discovery_response, indent=2)
-        }
-
-    except Exception as e:
-        logger.error(f"Discovery endpoint error: {e}")
-        return {
-            "statusCode": 500,
-            "headers": {"Content-Type": "application/json"},
-            "body": json.dumps({
+        except Exception as e:
+            logger.error(f"Discovery endpoint error: {e}")
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            error_response = {
                 "error": "server_error",
                 "error_description": f"Discovery failed: {str(e)}"
-            })
-        }
+            }
+            self.wfile.write(json.dumps(error_response).encode())
+
+    def do_POST(self):
+        self.do_GET()
+
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+        self.end_headers()
