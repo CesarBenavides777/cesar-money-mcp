@@ -145,21 +145,9 @@ class handler(BaseHTTPRequestHandler):
                 asyncio.set_event_loop(loop)
 
                 try:
-                    # Check if we have OAuth credentials in the request
-                    auth_header = self.headers.get('Authorization', '')
-                    oauth_token = None
-                    if auth_header.startswith('Bearer '):
-                        oauth_token = auth_header[7:]
-
-                    # Import the appropriate server based on OAuth availability
-                    if oauth_token:
-                        # Use OAuth-enabled server if token is present
-                        from fastmcp_oauth_server import mcp as fastmcp_server
-                        # Add OAuth context to arguments
-                        arguments['context'] = {'oauth_token': oauth_token}
-                    else:
-                        # Fall back to environment variable server
-                        from fastmcp_server import mcp as fastmcp_server
+                    # For now, always use the environment variable server
+                    # OAuth integration would require updating the tool signatures
+                    from fastmcp_server import mcp as fastmcp_server
 
                     # Get tools from FastMCP (async method)
                     tools = loop.run_until_complete(fastmcp_server.get_tools())
