@@ -108,22 +108,22 @@ async def get_accounts() -> str:
         account_summary = f"Found {len(accounts)} accounts:\n\n"
         for i, account in enumerate(accounts):
             logger.debug(f"Processing account {i+1}: {account.get('displayName', 'Unknown')}")
-            name_str = account.get('displayName') or 'Unknown Account'
+            name_str = str(account.get('displayName') or 'Unknown Account')
             balance = account.get('currentBalance') or 0
 
             # Safely extract account type
             type_obj = account.get('type') or {}
-            account_type = type_obj.get('display') or 'Unknown'
+            account_type = str(type_obj.get('display') or 'Unknown')
 
             # Safely extract institution name
             institution_obj = account.get('institution') or {}
-            institution = institution_obj.get('name') or 'Unknown'
+            institution = str(institution_obj.get('name') or 'Unknown')
 
             account_summary += f"📊 **{name_str}**\n"
             account_summary += f"   Balance: ${balance:,.2f}\n"
             account_summary += f"   Type: {account_type}\n"
             account_summary += f"   Institution: {institution}\n"
-            account_summary += f"   ID: {account.get('id') or 'N/A'}\n\n"
+            account_summary += f"   ID: {str(account.get('id') or 'N/A')}\n\n"
 
         logger.info("Successfully processed accounts data")
         return account_summary
@@ -210,21 +210,21 @@ async def get_transactions(
         summary += f" (showing up to {limit}):\n\n"
 
         for tx in transactions[:20]:  # Show first 20 for readability
-            date_str = tx.get('date') or 'Unknown'
+            date_str = str(tx.get('date') or 'Unknown')
 
             # Safely extract merchant name
             merchant_obj = tx.get('merchant') or {}
-            merchant = merchant_obj.get('name') or 'Unknown Merchant'
+            merchant = str(merchant_obj.get('name') or 'Unknown Merchant')
 
             amount = tx.get('amount') or 0
 
             # Safely extract category name
             category_obj = tx.get('category') or {}
-            category = category_obj.get('name') or 'Uncategorized'
+            category = str(category_obj.get('name') or 'Uncategorized')
 
             # Safely extract account name
             account_obj = tx.get('account') or {}
-            account_name = account_obj.get('displayName') or 'Unknown Account'
+            account_name = str(account_obj.get('displayName') or 'Unknown Account')
 
             summary += f"💳 **{date_str}** - {merchant}\n"
             summary += f"   Amount: ${amount:,.2f}\n"
