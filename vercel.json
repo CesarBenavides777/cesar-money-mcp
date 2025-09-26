@@ -6,6 +6,10 @@
   },
   "rewrites": [
     {
+      "source": "/",
+      "destination": "/api/mcp-discovery"
+    },
+    {
       "source": "/.well-known/mcp",
       "destination": "/api/mcp-discovery"
     },
@@ -48,10 +52,6 @@
     {
       "source": "/api/(accounts|transactions|budgets|spending-plan)",
       "destination": "/api/index"
-    },
-    {
-      "source": "/$",
-      "destination": "/api/mcp-discovery"
     },
     {
       "source": "/api$",
