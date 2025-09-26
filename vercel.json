@@ -1,4 +1,9 @@
 {
+  "functions": {
+    "api/oauth-working.py": {
+      "maxDuration": 30
+    }
+  },
   "rewrites": [
     {
       "source": "/.well-known/mcp",
