@@ -1,6 +1,14 @@
 {
   "rewrites": [
     {
+      "source": "/(oauth|mcp)/register",
+      "destination": "/api/oauth"
+    },
+    {
+      "source": "/oauth/(authorize|token)",
+      "destination": "/api/oauth"
+    },
+    {
       "source": "/api/auth/(.*)",
       "destination": "/api/auth"
     },

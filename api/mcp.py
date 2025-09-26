@@ -27,18 +27,30 @@ logger = logging.getLogger(__name__)
 API_KEY = os.getenv("API_KEY")
 
 def verify_auth(headers: Dict[str, str]) -> bool:
-    """Verify API key authentication"""
+    """Verify authentication (API key or OAuth Bearer token)"""
     if not API_KEY:
         logger.error("API_KEY not configured")
         return False
 
-    provided_key = headers.get("x-api-key") or headers.get("X-API-Key")
-    if not provided_key:
-        logger.warning("No API key provided")
-        return False
+    # Check for Bearer token first (OAuth)
+    auth_header = headers.get("authorization") or headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header[7:]  # Remove "Bearer " prefix
+        import hmac
+        if hmac.compare_digest(token, API_KEY):
+            logger.info("OAuth Bearer token authenticated")
+            return True
 
-    import hmac
-    return hmac.compare_digest(provided_key, API_KEY)
+    # Check for API key header
+    provided_key = headers.get("x-api-key") or headers.get("X-API-Key")
+    if provided_key:
+        import hmac
+        if hmac.compare_digest(provided_key, API_KEY):
+            logger.info("API key authenticated")
+            return True
+
+    logger.warning("No valid authentication provided")
+    return False
 
 async def create_mcp_server():
     """Create and configure the MCP server"""
