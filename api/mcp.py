@@ -154,7 +154,7 @@ class handler(BaseHTTPRequestHandler):
                     # Import the appropriate server based on OAuth availability
                     if oauth_token:
                         # Use OAuth-enabled server if token is present
-                        from fastmcp_oauth_server import mcp as fastmcp_server, oauth_sessions
+                        from fastmcp_oauth_server import mcp as fastmcp_server
                         # Add OAuth context to arguments
                         arguments['context'] = {'oauth_token': oauth_token}
                     else:

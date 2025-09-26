@@ -21,10 +21,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("monarchmoney-fastmcp-oauth")
 
 # Create the MCP server with OAuth support
-mcp = FastMCP(
-    "Monarch Money MCP with OAuth",
-    description="Access your Monarch Money financial data with OAuth authentication"
-)
+mcp = FastMCP("Monarch Money MCP with OAuth")
 
 # OAuth configuration
 OAUTH_CLIENTS = {}  # Store registered OAuth clients
