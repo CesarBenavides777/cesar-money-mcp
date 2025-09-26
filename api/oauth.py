@@ -127,7 +127,13 @@ class handler(BaseHTTPRequestHandler):
         response_type = query_params.get('response_type', [''])[0]
         client_id = query_params.get('client_id', [''])[0]
 
+        # Debug logging
+        import logging
+        logger.info(f"OAuth request - action: {action}, response_type: {response_type}, client_id: {client_id}")
+        logger.info(f"Full query params: {query_params}")
+
         # OAuth authorization endpoint - handle incoming authorization request
+        # This should trigger when Claude Code sends user for authorization
         if response_type == "code" and client_id:
             redirect_uri = query_params.get('redirect_uri', [''])[0]
             state = query_params.get('state', [''])[0]
