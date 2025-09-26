@@ -114,7 +114,7 @@ class handler(BaseHTTPRequestHandler):
                     "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"]
                 },
                 "endpoints": {
-                    "mcp": f"{base_url}/api",
+                    "mcp": f"{base_url}/mcp",
                     "tools": f"{base_url}/tools/call",
                     "oauth_register": f"{base_url}/oauth/register",
                     "oauth_authorize": f"{base_url}/oauth/authorize",
