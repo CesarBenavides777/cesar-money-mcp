@@ -1,99 +1,232 @@
-# Monarch Money MCP Server
+# Monarch Money MCP Server 💰
 
-A server application built with FastMCP to expose tools for interacting with a Monarch Money account via the [hammem/monarchmoney](https://github.com/hammem/monarchmoney) library.
+A Model Context Protocol (MCP) server that provides secure access to your Monarch Money financial data through Claude or any MCP-compatible client.
 
-## Features
+## 🌟 Features
 
-This server provides the following tools that can be called via the MCP protocol:
+- **5 Core Financial Tools**:
+  - `get_accounts` - View all your financial accounts with balances
+  - `get_transactions` - Search and filter transaction history
+  - `get_budgets` - Access budget information and categories
+  - `get_spending_plan` - Review monthly spending plans
+  - `get_account_history` - Track account balance history over time
 
-- [x] `get_accounts` — gets all the accounts linked to Monarch Money
-- [x] `get_account_holdings` — gets all of the securities in a brokerage or similar type of account
-- [x] `get_account_type_options` — all account types and their subtypes available in Monarch Money
-- [x] `get_account_history` — gets all daily account history for the specified account
-- [x] `get_institutions` — gets institutions linked to Monarch Money
-- [x] `get_budgets` — all the budgets and the corresponding actual amounts
-- [ ] `get_subscription_details` — gets the Monarch Money account's status (e.g., paid or trial)
-- [x] `get_recurring_transactions` — gets the future recurring transactions, including merchant and account details
-- [x] `get_transactions_summary` — gets the transaction summary data from the transactions page
-- [x] `get_transactions` — gets transaction data, defaults to returning the last 100 transactions; can also be searched by date range
-- [x] `get_transaction_categories` — gets all of the categories configured in the account
-- [x] `get_transaction_category_groups` — all category groups configured in the account
-- [ ] `get_transaction_details` — gets detailed transaction data for a single transaction
-- [ ] `get_transaction_splits` — gets transaction splits for a single transaction
-- [ ] `get_transaction_tags` — gets all of the tags configured in the account
-- [x] `get_cashflow` — gets cashflow data (by category, category group, merchant, and a summary)
-- [x] `get_cashflow_summary` — gets cashflow summary (income, expense, savings, savings rate)
-- [ ] `is_accounts_refresh_complete` — gets the status of a running account refresh
+- **Multiple Authentication Methods**:
+  - OAuth 2.0 flow (recommended for production)
+  - Environment variables (for development)
+  - Interactive credentials input (for testing)
 
-## Setup
+- **Multiple Deployment Options**:
+  - Vercel serverless deployment
+  - Local development server
+  - Docker containerization (coming soon)
 
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/richardadonnell/monarchmoney-mcp
-    cd monarchmoney-mcp
-    ```
-2.  **Install dependencies:**
-    Make sure you have Python 3.x installed. Then, install the required packages:
-    ```bash
-    pip install -r requirements.txt
-    ```
+## 🚀 Quick Start
 
-## Configuration
+### Option 1: Deploy to Vercel (Recommended)
 
-This server requires credentials to access your Monarch Money account. Create a `.env` file in the project root directory with the following variables:
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/yourusername/monarchmoney-mcp)
 
-```dotenv
-MONARCH_EMAIL=your_email@example.com
-MONARCH_PASSWORD=your_monarch_password
-# Optional: Only required if your account uses MFA/TOTP. Comment out line below if not needed.
-MONARCH_MFA_SECRET=your_mfa_totp_secret_key
-```
+See [Vercel Deployment Guide](docs/DEPLOY_VERCEL.md) for detailed instructions.
 
-- Replace the placeholder values with your actual Monarch Money email and password.
-- If you use Multi-Factor Authentication (MFA) with an authenticator app (TOTP), you can provide your secret key (`MONARCH_MFA_SECRET`) for non-interactive logins. If this is not provided and MFA is required, the login attempts within the tools will fail.
+### Option 2: Local Development
 
-**Security Note:** Keep your `.env` file secure and do not commit it to version control.
+1. **Clone the repository**:
+   ```bash
+   git clone https://github.com/yourusername/monarchmoney-mcp.git
+   cd monarchmoney-mcp
+   ```
 
-## Running the Server
+2. **Install dependencies**:
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+   pip install -r requirements.txt
+   ```
 
-There are two ways to configure your IDE (like Cursor or Claude Desktop) to use this MCP tool:
+3. **Run tests** (no credentials needed for initial test):
+   ```bash
+   python tests/test_all_tools.py
+   ```
 
-### Option 1: Manual Configuration (Cursor)
+4. **Start the server**:
+   ```bash
+   python fastmcp_server.py
+   ```
 
-1.  **Create `mcp.json`:** Create a file named `mcp.json` in the `.cursor` folder within your workspace. **Make sure to replace the absolute path to `main.py` with the correct path on your system.**
+See [Local Setup Guide](docs/LOCAL_SETUP.md) for more details.
 
-    ```json
-    {
-      "mcpServers": {
-        "MonarchMoneyTool": {
-          "command": "uv",
-          "args": [
-            "run",
-            "--with",
-            "mcp[cli]",
-            "mcp",
-            "run",
-            "C:\\\\example\\\\path\\\\to\\\\project\\\\main.py"
-          ]
-        }
-      }
-    }
-    ```
+## 🧪 Testing
 
-### Option 2: Automatic Installation (Claude Desktop / MCP CLI)
+### Comprehensive Test Suite
 
-If you have the MCP CLI installed, you can automatically configure the tool by running the following command in the root directory of this project:
+The project includes a comprehensive test suite that works with multiple authentication methods:
 
 ```bash
-mcp install main.py
+# Test with OAuth credentials (interactive)
+python tests/test_all_tools.py
+
+# Test with command-line credentials
+python tests/test_all_tools.py your_email@example.com your_password [mfa_secret]
+
+# Test with environment variables
+export MONARCH_EMAIL=your_email@example.com
+export MONARCH_PASSWORD=your_password
+export MONARCH_MFA_SECRET=your_mfa_secret  # Optional
+python tests/test_all_tools.py
 ```
 
-## Dependencies
+### Test Coverage
 
-- [FastMCP](https://github.com/AutonomousResearchGroup/FastMCP)
-- [monarchmoney](https://github.com/hammem/monarchmoney)
-- [python-dotenv](https://github.com/theskumar/python-dotenv)
-- [uvicorn](https://www.uvicorn.org/)
-- [aiohttp](https://docs.aiohttp.org/en/stable/) (Dependency of monarchmoney)
-- [gql](https://gql.readthedocs.io/en/latest/) (Dependency of monarchmoney)
-- [oathtool](https://www.nongnu.org/oath-toolkit/oathtool.1.html) (Dependency of monarchmoney)
+The test suite covers:
+- ✅ Connection and authentication
+- ✅ All 5 MCP tools
+- ✅ OAuth flow integration
+- ✅ Error handling
+- ✅ Data validation
+
+## 📚 Documentation
+
+### Setup Guides
+- [Local Development Setup](docs/LOCAL_SETUP.md) - Get started locally
+- [Vercel Deployment](docs/DEPLOY_VERCEL.md) - Deploy to production
+- [FastMCP Configuration](docs/FASTMCP_SETUP.md) - FastMCP framework details
+
+### OAuth Integration
+- [OAuth Setup Guide](docs/OAUTH_SETUP.md) - Basic OAuth implementation
+- [OAuth with FastMCP](docs/OAUTH_FASTMCP_SETUP.md) - Advanced OAuth integration
+
+## 🏗️ Project Structure
+
+```
+monarchmoney-mcp/
+├── api/                    # API endpoints
+│   ├── mcp.py             # Main MCP JSON-RPC endpoint
+│   ├── oauth-working.py   # OAuth implementation
+│   └── ...
+├── docs/                   # Documentation
+│   ├── DEPLOY_VERCEL.md
+│   ├── LOCAL_SETUP.md
+│   └── ...
+├── tests/                  # Test suite
+│   ├── test_all_tools.py # Comprehensive test suite
+│   ├── integration/       # Integration tests
+│   └── utils/             # Test utilities
+├── fastmcp_server.py      # Main FastMCP server
+├── fastmcp_oauth_server.py # OAuth-enabled server
+├── requirements.txt       # Python dependencies
+├── vercel.json           # Vercel configuration
+└── README.md             # This file
+```
+
+## 🔐 Security
+
+### Best Practices
+
+1. **Never commit credentials** to version control
+2. **Use OAuth flow** for production deployments
+3. **Enable MFA** on your Monarch Money account
+4. **Use HTTPS** for all API endpoints
+5. **Rotate tokens** regularly
+
+### Environment Variables
+
+If using environment variables (development only):
+
+```bash
+# .env file (never commit this!)
+MONARCH_EMAIL=your_email@example.com
+MONARCH_PASSWORD=your_password
+MONARCH_MFA_SECRET=your_mfa_secret  # Optional
+```
+
+## 🛠️ API Reference
+
+### MCP Tools
+
+#### `get_accounts()`
+Returns all financial accounts with current balances.
+
+#### `get_transactions(start_date?, end_date?, limit?, account_id?)`
+Fetches transactions with optional filtering.
+
+#### `get_budgets()`
+Retrieves budget information and categories.
+
+#### `get_spending_plan(month?)`
+Gets spending plan for specified month (default: current month).
+
+#### `get_account_history(account_id, start_date?, end_date?)`
+Returns balance history for a specific account.
+
+### JSON-RPC Endpoints
+
+```javascript
+// List available tools
+{
+  "jsonrpc": "2.0",
+  "method": "tools/list",
+  "id": 1
+}
+
+// Call a tool
+{
+  "jsonrpc": "2.0",
+  "method": "tools/call",
+  "params": {
+    "name": "get_transactions",
+    "arguments": {
+      "start_date": "2025-01-01",
+      "end_date": "2025-01-31",
+      "limit": 50
+    }
+  },
+  "id": 2
+}
+```
+
+## 🤝 Contributing
+
+We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
+
+### Development Setup
+
+1. Fork the repository
+2. Create a feature branch
+3. Run tests: `python tests/test_all_tools.py`
+4. Submit a pull request
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- [Monarch Money](https://monarchmoney.com) for the excellent financial platform
+- [FastMCP](https://github.com/jlowin/fastmcp) for the MCP framework
+- [Anthropic](https://anthropic.com) for the MCP specification
+
+## 🐛 Troubleshooting
+
+### Common Issues
+
+**Issue**: "FunctionTool object is not callable"
+- **Solution**: Update to latest version, this has been fixed
+
+**Issue**: "Monarch credentials not configured"
+- **Solution**: Use OAuth flow or set environment variables
+
+**Issue**: "MFA is required"
+- **Solution**: Provide MFA secret or disable MFA temporarily for testing
+
+For more issues, check our [Troubleshooting Guide](docs/TROUBLESHOOTING.md) or open an issue.
+
+## 📞 Support
+
+- **Issues**: [GitHub Issues](https://github.com/yourusername/monarchmoney-mcp/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/yourusername/monarchmoney-mcp/discussions)
+- **Email**: support@example.com
+
+---
+
+Built with ❤️ for the Monarch Money community

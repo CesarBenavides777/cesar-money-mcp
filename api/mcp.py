@@ -145,16 +145,39 @@ class handler(BaseHTTPRequestHandler):
                 asyncio.set_event_loop(loop)
 
                 try:
-                    # Import the FastMCP server
-                    from fastmcp_server import mcp as fastmcp_server
+                    # Check if we have OAuth credentials in the request
+                    auth_header = self.headers.get('Authorization', '')
+                    oauth_token = None
+                    if auth_header.startswith('Bearer '):
+                        oauth_token = auth_header[7:]
+
+                    # Import the appropriate server based on OAuth availability
+                    if oauth_token:
+                        # Use OAuth-enabled server if token is present
+                        from fastmcp_oauth_server import mcp as fastmcp_server, oauth_sessions
+                        # Add OAuth context to arguments
+                        arguments['context'] = {'oauth_token': oauth_token}
+                    else:
+                        # Fall back to environment variable server
+                        from fastmcp_server import mcp as fastmcp_server
+
+                    # Get tools from FastMCP (async method)
+                    tools = loop.run_until_complete(fastmcp_server.get_tools())
 
                     # Check if tool exists
-                    if tool_name not in fastmcp_server.tools:
+                    if tool_name not in tools:
                         raise ValueError(f"Unknown tool: {tool_name}")
 
-                    # Get the tool and execute it
-                    tool = fastmcp_server.tools[tool_name]
-                    result = loop.run_until_complete(tool.func(**arguments))
+                    # Get the tool and execute it using run method
+                    tool = tools[tool_name]
+                    tool_result = loop.run_until_complete(tool.run(arguments))
+
+                    # Extract the text content from the result
+                    result = ""
+                    if tool_result.content:
+                        for content in tool_result.content:
+                            if hasattr(content, 'text'):
+                                result += content.text
 
                     response = {
                         "jsonrpc": "2.0",
