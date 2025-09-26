@@ -17,6 +17,12 @@ if sys.version_info < (3, 9):
 # Import monarchmoney library
 from monarchmoney import MonarchMoney, RequireMFAException
 
+# Import auth module for token verification
+try:
+    from .auth import verify_token
+except ImportError:
+    from auth import verify_token
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -26,27 +32,38 @@ API_KEY = os.getenv("API_KEY")
 MONARCH_EMAIL = os.getenv("MONARCH_EMAIL")
 MONARCH_PASSWORD = os.getenv("MONARCH_PASSWORD")
 MONARCH_MFA_SECRET = os.getenv("MONARCH_MFA_SECRET")
+JWT_SECRET = os.getenv("JWT_SECRET")  # For OAuth token verification
 
 class AuthError(Exception):
     """Authentication error"""
     pass
 
-def verify_api_key(headers: dict) -> bool:
-    """Verify API key from request headers"""
-    if not API_KEY:
-        logger.error("API_KEY not configured in environment")
-        return False
+def verify_auth(headers: dict) -> tuple[bool, Optional[str]]:
+    """Verify authentication via API key or OAuth token
 
-    # Check for API key in headers
-    provided_key = headers.get("x-api-key") or headers.get("X-API-Key")
+    Returns:
+        (is_authenticated, auth_method)
+    """
+    # Check for OAuth Bearer token first
+    auth_header = headers.get("authorization") or headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header[7:]  # Remove "Bearer " prefix
+        token_payload = verify_token(token)
+        if token_payload:
+            logger.info(f"OAuth token authenticated for user: {token_payload.get('sub')}")
+            return True, "oauth"
 
-    if not provided_key:
-        logger.warning("No API key provided in request")
-        return False
+    # Check for API key
+    if API_KEY:
+        provided_key = headers.get("x-api-key") or headers.get("X-API-Key")
+        if provided_key:
+            import hmac
+            if hmac.compare_digest(provided_key, API_KEY):
+                logger.info("API key authenticated")
+                return True, "api_key"
 
-    # Constant-time comparison to prevent timing attacks
-    import hmac
-    return hmac.compare_digest(provided_key, API_KEY)
+    logger.warning("No valid authentication provided")
+    return False, None
 
 async def get_monarch_client() -> MonarchMoney:
     """Create and authenticate Monarch Money client"""
@@ -225,16 +242,19 @@ async def handle_request(event: dict) -> dict:
             "body": ""
         }
 
-    # Verify API key
+    # Verify authentication
     request_headers = event.get("headers", {})
-    if not verify_api_key(request_headers):
+    is_authenticated, auth_method = verify_auth(request_headers)
+
+    if not is_authenticated:
         return {
             "statusCode": 401,
             "headers": headers,
             "body": json.dumps({
                 "success": False,
-                "error": "Invalid or missing API key",
-                "code": "UNAUTHORIZED"
+                "error": "Authentication required. Provide either Bearer token or X-API-Key",
+                "code": "UNAUTHORIZED",
+                "auth_url": "/api/auth/login"
             })
         }
 

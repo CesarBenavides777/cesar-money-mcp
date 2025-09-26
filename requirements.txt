@@ -1,1 +1,2 @@
 monarchmoney>=0.1.15
+PyJWT>=2.8.0
