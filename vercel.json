@@ -18,6 +18,10 @@
       "destination": "/api/mcp-discovery"
     },
     {
+      "source": "/health",
+      "destination": "/api/mcp-discovery"
+    },
+    {
       "source": "/oauth/register",
       "destination": "/api/oauth-working"
     },

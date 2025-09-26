@@ -87,6 +87,10 @@ class handler(BaseHTTPRequestHandler):
             base_url = "https://cesar-money-mcp.vercel.app"
 
             discovery_response = {
+                "name": "Monarch Money MCP Server",
+                "version": "1.0.0",
+                "description": "Access your Monarch Money financial data via MCP",
+                "protocol_version": "2024-11-05",
                 "server_info": {
                     "name": "Monarch Money MCP Server",
                     "version": "1.0.0",

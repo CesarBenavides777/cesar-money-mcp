@@ -117,6 +117,8 @@ class handler(BaseHTTPRequestHandler):
             oauth_clients[client_id] = {
                 "client_secret": client_secret,
                 "redirect_uris": [
+                    "https://api.agent.ai/api/v3/mcp/flow/redirect",
+                    "https://agent.ai/oauth/callback",
                     "https://cesar-money-iy550m0ua-csar-e-benavides-projects.vercel.app/callback",
                     "http://localhost:3000/callback",
                     "mcp://oauth/callback"
