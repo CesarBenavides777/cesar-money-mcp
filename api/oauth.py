@@ -7,9 +7,7 @@ import json
 import os
 import secrets
 import logging
-from datetime import datetime
 from typing import Dict, Any
-from urllib.parse import urlencode
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -62,7 +60,7 @@ def handle_client_registration(event: Dict[str, Any]) -> Dict[str, Any]:
         registration_response = {
             "client_id": client_id,
             "client_secret": client_secret,
-            "client_id_issued_at": int(datetime.now().timestamp()),
+            "client_id_issued_at": 1640995200,  # Fixed timestamp
             "client_secret_expires_at": 0,  # Never expires
             "redirect_uris": redirect_uris,
             "grant_types": ["authorization_code"],
@@ -128,12 +126,12 @@ def handle_authorization_request(event: Dict[str, Any]) -> Dict[str, Any]:
     # In a real implementation, you'd store this code and associate it with the client
     # For now, we'll redirect with the code immediately
 
-    callback_params = {
-        "code": auth_code,
-        "state": state
-    }
+    callback_params = []
+    callback_params.append(f"code={auth_code}")
+    if state:
+        callback_params.append(f"state={state}")
 
-    callback_url = f"{redirect_uri}?{urlencode(callback_params)}"
+    callback_url = f"{redirect_uri}?{'&'.join(callback_params)}"
 
     # Return authorization page that auto-redirects
     return {
@@ -226,10 +224,12 @@ def handle_token_request(event: Dict[str, Any]) -> Dict[str, Any]:
             if body.startswith("{"):
                 request_data = json.loads(body)
             else:
-                # Parse form data
-                import urllib.parse
-                parsed = urllib.parse.parse_qs(body)
-                request_data = {k: v[0] if isinstance(v, list) and v else v for k, v in parsed.items()}
+                # Simple form data parsing
+                pairs = body.split("&")
+                for pair in pairs:
+                    if "=" in pair:
+                        key, value = pair.split("=", 1)
+                        request_data[key] = value
     except Exception as e:
         logger.error(f"Error parsing request body: {e}")
         request_data = {}

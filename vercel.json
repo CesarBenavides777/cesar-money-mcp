@@ -10,23 +10,23 @@
     },
     {
       "source": "/oauth/register",
-      "destination": "/api/oauth"
+      "destination": "/api/oauth-simple"
     },
     {
       "source": "/mcp/register",
-      "destination": "/api/oauth"
+      "destination": "/api/oauth-simple"
     },
     {
       "source": "/register",
-      "destination": "/api/oauth"
+      "destination": "/api/oauth-simple"
     },
     {
       "source": "/oauth/authorize",
-      "destination": "/api/oauth"
+      "destination": "/api/oauth-simple"
     },
     {
       "source": "/oauth/token",
-      "destination": "/api/oauth"
+      "destination": "/api/oauth-simple"
     },
     {
       "source": "/tools/call",
