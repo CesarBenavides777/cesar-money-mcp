@@ -194,19 +194,47 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(login_form.encode())
             return
 
-        # OAuth registration endpoint
+        # OAuth registration endpoint - generate new client credentials
         elif action == "register":
+            client_id, client_secret = generate_client_credentials()
+            oauth_clients[client_id] = {
+                "client_secret": client_secret,
+                "redirect_uris": [
+                    "https://api.agent.ai/api/v3/mcp/flow/redirect",
+                    "https://agent.ai/oauth/callback",
+                    "https://claude.ai/oauth/callback",
+                    "https://claude.ai/api/mcp/auth_callback",
+                    f"{base_url}/callback",
+                    "http://localhost:3000/callback",
+                    "mcp://oauth/callback"
+                ],
+                "created_at": json.dumps({"timestamp": "2024-09-26T18:21:12Z"})
+            }
+
+            response = {
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "redirect_uris": oauth_clients[client_id]["redirect_uris"],
+                "grant_types": ["authorization_code"],
+                "response_types": ["code"],
+                "scope": "mcp:read mcp:write accounts:read transactions:read budgets:read"
+            }
+            self.wfile.write(json.dumps(response, indent=2).encode())
+            return
+
+        # OAuth authorization endpoint - for when Claude Code redirects user for login
+        elif action == "authorize" or (response_type == "code" and client_id and not action):
             redirect_uri = query_params.get('redirect_uri', [''])[0]
             state = query_params.get('state', [''])[0]
-            client_id = query_params.get('client_id', [''])[0]
+            scope = query_params.get('scope', [''])[0]
 
+            # Auto-register client if it doesn't exist (for demo purposes)
             if client_id not in oauth_clients:
-                self.send_response(400)
-                self.send_header('Content-Type', 'application/json')
-                self.end_headers()
-                error_response = {"error": "invalid_client", "error_description": "Unknown client_id"}
-                self.wfile.write(json.dumps(error_response).encode())
-                return
+                oauth_clients[client_id] = {
+                    "client_secret": secrets.token_urlsafe(32),
+                    "redirect_uris": [redirect_uri],
+                    "created_at": json.dumps({"timestamp": "2024-09-26T18:21:12Z"})
+                }
 
             # Show login form
             self.send_response(200)
