@@ -1,11 +1,23 @@
 {
   "rewrites": [
     {
-      "source": "/(oauth|mcp)/register",
+      "source": "/oauth/register",
       "destination": "/api/oauth"
     },
     {
-      "source": "/oauth/(authorize|token)",
+      "source": "/mcp/register",
+      "destination": "/api/oauth"
+    },
+    {
+      "source": "/register",
+      "destination": "/api/oauth"
+    },
+    {
+      "source": "/oauth/authorize",
+      "destination": "/api/oauth"
+    },
+    {
+      "source": "/oauth/token",
       "destination": "/api/oauth"
     },
     {

@@ -15,7 +15,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Environment variables
-BASE_URL = os.getenv("VERCEL_URL", "https://cesar-money-mcp.vercel.app")
+BASE_URL = "https://cesar-money-mcp.vercel.app"  # Fixed base URL
 API_KEY = os.getenv("API_KEY")
 
 def handle_client_registration(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -191,18 +191,20 @@ def handle_token_request(event: Dict[str, Any]) -> Dict[str, Any]:
             "body": ""
         }
 
-    # Parse form data from body
+    # Parse request data
+    request_data = {}
     try:
         body = event.get("body", "")
-        # Handle both JSON and form-encoded data
-        if body.startswith("{"):
-            request_data = json.loads(body)
-        else:
-            # Parse form data
-            from urllib.parse import parse_qs
-            parsed = parse_qs(body)
-            request_data = {k: v[0] if isinstance(v, list) and v else v for k, v in parsed.items()}
-    except:
+        if body:
+            if body.startswith("{"):
+                request_data = json.loads(body)
+            else:
+                # Parse form data
+                import urllib.parse
+                parsed = urllib.parse.parse_qs(body)
+                request_data = {k: v[0] if isinstance(v, list) and v else v for k, v in parsed.items()}
+    except Exception as e:
+        logger.error(f"Error parsing request body: {e}")
         request_data = {}
 
     grant_type = request_data.get("grant_type")
@@ -237,21 +239,36 @@ def handle_token_request(event: Dict[str, Any]) -> Dict[str, Any]:
 
 def handler(event, context):
     """Main handler for OAuth endpoints"""
-    path = event.get("path", "").strip("/")
+    try:
+        path = event.get("path", "").strip("/")
+        method = event.get("httpMethod", "GET")
 
-    # Route to appropriate handler
-    if "register" in path:
-        return handle_client_registration(event)
-    elif path.endswith("oauth/authorize") or path.endswith("authorize"):
-        return handle_authorization_request(event)
-    elif path.endswith("oauth/token") or path.endswith("token"):
-        return handle_token_request(event)
-    else:
+        logger.info(f"OAuth request: {method} {path}")
+
+        # Route to appropriate handler
+        if "register" in path:
+            return handle_client_registration(event)
+        elif "authorize" in path:
+            return handle_authorization_request(event)
+        elif "token" in path:
+            return handle_token_request(event)
+        else:
+            logger.warning(f"Unknown OAuth path: {path}")
+            return {
+                "statusCode": 404,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps({
+                    "error": "not_found",
+                    "error_description": f"OAuth endpoint not found: {path}"
+                })
+            }
+    except Exception as e:
+        logger.error(f"OAuth handler error: {e}")
         return {
-            "statusCode": 404,
+            "statusCode": 500,
             "headers": {"Content-Type": "application/json"},
             "body": json.dumps({
-                "error": "not_found",
-                "error_description": f"OAuth endpoint not found: {path}"
+                "error": "server_error",
+                "error_description": f"Internal server error: {str(e)}"
             })
         }
