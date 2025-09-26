@@ -29,6 +29,22 @@
       "destination": "/api/oauth"
     },
     {
+      "source": "/register",
+      "destination": "/api/oauth?action=register"
+    },
+    {
+      "source": "/mcp/register",
+      "destination": "/api/oauth?action=register"
+    },
+    {
+      "source": "/mcp/oauth/register",
+      "destination": "/api/oauth?action=register"
+    },
+    {
+      "source": "/oauth/register",
+      "destination": "/api/oauth?action=register"
+    },
+    {
       "source": "/mcp",
       "destination": "/api/mcp"
     },
