@@ -20,14 +20,20 @@ class handler(BaseHTTPRequestHandler):
         query_params = parse_qs(parsed_url.query)
 
         # Extract OAuth parameters
-        client_id = query_params.get('client_id', [''])[0]
+        client_id = query_params.get('client_id', ['unknown'])[0]
         redirect_uri = query_params.get('redirect_uri', [''])[0]
         state = query_params.get('state', [''])[0]
         error = query_params.get('error', [''])[0]
 
+        # Always show the form regardless of client_id (validation happens during processing)
+
         # Send HTML response
         self.send_response(200)
         self.send_header('Content-type', 'text/html; charset=utf-8')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+        self.send_header('Cache-Control', 'no-cache')
         self.end_headers()
 
         error_message = ""
@@ -137,3 +143,10 @@ class handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         self.do_GET()
+
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+        self.end_headers()
