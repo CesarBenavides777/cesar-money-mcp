@@ -106,22 +106,31 @@ mcp = FastMCP("Monarch Money MCP Server")
 
 def safe_str(value, default="Unknown"):
     """Ultra-safe string conversion that handles None, empty, and complex objects"""
-    if value is None:
-        return str(default)
-    if isinstance(value, str):
-        return value if value.strip() else str(default)
     try:
+        if value is None:
+            return str(default)
+        if isinstance(value, str):
+            return value if value.strip() else str(default)
+        # Handle numeric types safely
+        if isinstance(value, (int, float)):
+            return str(value)
+        # Try converting to string
         result = str(value)
         return result if result.strip() else str(default)
-    except (TypeError, ValueError):
+    except Exception:
+        # Catch ANY exception and return default
         return str(default)
 
 def safe_dict_get(obj, key, default="Unknown"):
     """Safely get a value from a dictionary-like object"""
-    if not isinstance(obj, dict):
+    try:
+        if obj is None or not isinstance(obj, dict):
+            return str(default)
+        value = obj.get(key)
+        return safe_str(value, default)
+    except Exception:
+        # Catch ANY exception and return default
         return str(default)
-    value = obj.get(key)
-    return safe_str(value, default)
 
 async def get_monarch_client() -> MonarchMoney:
     """Get authenticated Monarch Money client with proper error handling"""

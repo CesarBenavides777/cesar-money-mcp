@@ -1,732 +1,592 @@
-import asyncio
-import calendar
-import logging
+#!/usr/bin/env python3
+"""
+Claude Custom Connector Compatible MCP Server
+Designed for remote deployment and Claude integration
+Follows MCP 2025-06-18 specification
+"""
+
 import os
-from datetime import datetime, timedelta
+import sys
+import asyncio
+import json
+import logging
+from typing import Dict, Any, List
+from datetime import datetime, timezone
+import traceback
 
-import uvicorn
-from dotenv import load_dotenv
-from mcp.server.fastmcp import FastMCP
-from monarchmoney import MonarchMoney, RequireMFAException
+# FastAPI for HTTP server
+try:
+    from fastapi import FastAPI, HTTPException, Request, Depends, Header
+    from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.responses import JSONResponse
+    import uvicorn
+except ImportError:
+    print("FastAPI not installed. Install with: pip install fastapi uvicorn")
+    sys.exit(1)
 
-# Configure basic logging
+# Import our configuration from the main server
+import os
+import sys
+sys.path.append(os.path.dirname(__file__))
+
+# Simple config for the connector
+class SimpleConfig:
+    def __init__(self):
+        self.server_name = "Monarch Money MCP Server"
+        self.server_version = "1.0.0"
+        self.protocol_version = "2025-06-18"
+
+config = SimpleConfig()
+
+# Configure logging
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("monarchmoney-claude-connector")
 
-# Load environment variables from .env file
-load_dotenv()
+# Global instances - removed complex OAuth manager for Claude compatibility
 
-# --- Configuration ---
-MONARCH_EMAIL = os.getenv("MONARCH_EMAIL")
-MONARCH_PASSWORD = os.getenv("MONARCH_PASSWORD")
-MONARCH_MFA_SECRET = os.getenv("MONARCH_MFA_SECRET") # Optional
+# FastAPI app
+app = FastAPI(
+    title="Monarch Money MCP Server",
+    description="Model Context Protocol server for Monarch Money - Compatible with Claude Custom Connectors",
+    version="1.0.0"
+)
 
-# --- MCP Server Setup ---
-mcp = FastMCP("MonarchMoneyTool", description="MCP Tool to interact with Monarch Money.")
+# CORS configuration for Claude compatibility
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://claude.ai", "https://claude.com", "http://localhost:*"],  # Claude domains + localhost for testing
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+)
 
-# --- Tools ---
-@mcp.tool(name="get_accounts")
-async def get_accounts() -> list[dict]:
-    """
-    Retrieves a list of all accounts linked to the configured Monarch Money account.
-    Corresponds to the get_accounts method in the hammem/monarchmoney library.
-    Returns a list of account dictionaries or an error dictionary.
-    """
-    # --- Monarch Money Client & Login (Encapsulated within the tool) ---
-    if not MONARCH_EMAIL or not MONARCH_PASSWORD:
-        logger.error("Cannot proceed: Email or password not configured in .env.")
-        return [{"error": "Monarch Money email or password not configured on the server."}]
+# OAuth 2.1 Authorization Server Metadata (RFC 8414)
+@app.get("/.well-known/oauth-authorization-server")
+async def oauth_metadata():
+    """OAuth 2.1 authorization server metadata"""
+    base_url = os.getenv("BASE_URL", "https://cesar-money-mcp.vercel.app")
 
-    mm_client = MonarchMoney()
-    logger.info("Attempting to log in to Monarch Money...")
+    return {
+        "issuer": base_url,
+        "authorization_endpoint": f"{base_url}/oauth/authorize",
+        "token_endpoint": f"{base_url}/oauth/token",
+        "registration_endpoint": f"{base_url}/oauth/register",
+        "response_types_supported": ["code"],
+        "grant_types_supported": ["authorization_code", "refresh_token"],
+        "code_challenge_methods_supported": ["S256"],
+        "token_endpoint_auth_methods_supported": ["none"],
+        "scopes_supported": ["accounts:read", "transactions:read", "budgets:read"]
+    }
+
+# OAuth 2.0 Protected Resource Metadata (RFC 9728)
+@app.get("/.well-known/oauth-protected-resource")
+async def protected_resource_metadata():
+    """OAuth 2.0 protected resource metadata"""
+    base_url = os.getenv("BASE_URL", "https://cesar-money-mcp.vercel.app")
+
+    return {
+        "resource": base_url,
+        "authorization_servers": [base_url],
+        "bearer_methods_supported": ["header"],
+        "scopes_supported": ["accounts:read", "transactions:read", "budgets:read"]
+    }
+
+# Dynamic Client Registration (RFC 7591) - Required for Claude Custom Connectors
+@app.post("/oauth/register")
+async def oauth_register(request: Request):
+    """Dynamic Client Registration endpoint for Claude Custom Connectors"""
     try:
-        await mm_client.login(
-            email=MONARCH_EMAIL,
-            password=MONARCH_PASSWORD,
-            mfa_secret_key=MONARCH_MFA_SECRET, # Will be None if not set, library handles it
-            save_session=False, # Explicitly disable saving session
-            use_saved_session=False # Explicitly disable using saved session
+        body = await request.json()
+
+        # Validate Claude's registration request
+        if body.get("client_name") != "claudeai":
+            raise HTTPException(status_code=400, detail="Unsupported client")
+
+        # Generate unique client credentials for Claude
+        import secrets
+        client_id = secrets.token_hex(16)
+
+        # Claude expects this exact response format
+        return {
+            "client_id": client_id,
+            "client_name": "claudeai",
+            "grant_types": ["authorization_code", "refresh_token"],
+            "response_types": ["code"],
+            "token_endpoint_auth_method": "none",
+            "scope": "claudeai",
+            "redirect_uris": [
+                "https://claude.ai/api/mcp/auth_callback"
+            ],
+            "client_id_issued_at": int(datetime.now(timezone.utc).timestamp())
+        }
+
+    except Exception as e:
+        logger.error(f"Client registration error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/oauth/authorize")
+async def oauth_authorize(
+    response_type: str = "code",
+    client_id: str = "test-client",
+    redirect_uri: str = "http://localhost:3000/callback",
+    state: str = None,
+    scope: str = None,
+    code_challenge: str = None,
+    code_challenge_method: str = None
+):
+    """OAuth Authorization endpoint - renders user consent form"""
+    try:
+        # In production, validate client_id exists from registration
+        # For demo, we'll accept any client_id that looks like a hex string
+
+        # PKCE is required for real OAuth but optional for testing
+        if code_challenge and code_challenge_method != "S256":
+            raise HTTPException(status_code=400, detail="PKCE method must be S256")
+
+        # For testing without PKCE, generate a dummy challenge
+        if not code_challenge:
+            code_challenge = "test_challenge"
+            code_challenge_method = "S256"
+
+        # Return HTML consent form
+        html_form = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Monarch Money MCP Authorization</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; max-width: 400px; margin: 50px auto; padding: 20px; }}
+                .form-group {{ margin: 15px 0; }}
+                label {{ display: block; margin-bottom: 5px; font-weight: bold; }}
+                input {{ width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }}
+                button {{ width: 100%; padding: 10px; background: #007cba; color: white; border: none; border-radius: 4px; font-size: 16px; }}
+                .info {{ background: #f0f8ff; padding: 10px; border-radius: 4px; margin-bottom: 20px; }}
+            </style>
+        </head>
+        <body>
+            <h2>Authorize Claude MCP Access</h2>
+            <div class="info">
+                <p><strong>Claude</strong> wants to access your Monarch Money data.</p>
+                <p>This will allow Claude to read your accounts, transactions, and budgets.</p>
+            </div>
+            <form method="POST" action="/oauth/authorize">
+                <input type="hidden" name="client_id" value="{client_id}">
+                <input type="hidden" name="code_challenge" value="{code_challenge}">
+                <input type="hidden" name="code_challenge_method" value="{code_challenge_method}">
+                <input type="hidden" name="redirect_uri" value="{redirect_uri}">
+                <input type="hidden" name="response_type" value="{response_type}">
+                <input type="hidden" name="scope" value="{scope or 'claudeai'}">
+                {f'<input type="hidden" name="state" value="{state}">' if state else ''}
+
+                <div class="form-group">
+                    <label>This is a demo - click Authorize to continue:</label>
+                </div>
+
+                <button type="submit" name="action" value="authorize">Authorize Access</button>
+            </form>
+        </body>
+        </html>
+        """
+
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse(content=html_form)
+
+    except Exception as e:
+        logger.error(f"Authorization error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/oauth/authorize")
+async def oauth_authorize_post(request: Request):
+    """Process authorization form submission"""
+    try:
+        form_data = await request.form()
+
+        action = form_data.get("action")
+        if action != "authorize":
+            raise HTTPException(status_code=400, detail="Authorization denied")
+
+        client_id = form_data["client_id"]
+        code_challenge = form_data["code_challenge"]
+        redirect_uri = form_data["redirect_uri"]
+        state = form_data.get("state")
+
+        # Generate secure authorization code
+        import secrets
+        auth_code = secrets.token_hex(32)
+
+        # Store authorization code with PKCE challenge for token exchange
+        # In production, store this securely with expiration
+        auth_storage[auth_code] = {
+            "client_id": client_id,
+            "code_challenge": code_challenge,
+            "redirect_uri": redirect_uri,
+            "expires_at": datetime.now(timezone.utc).timestamp() + 600,  # 10 minutes
+            "user_id": "demo_user"  # In real app, get from authentication
+        }
+
+        # Redirect back to Claude
+        callback_url = f"{redirect_uri}?code={auth_code}"
+        if state:
+            callback_url += f"&state={state}"
+
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url=callback_url, status_code=302)
+
+    except Exception as e:
+        logger.error(f"Authorization processing error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/oauth/token")
+async def oauth_token(request: Request):
+    """OAuth Token endpoint - handles both authorization_code and refresh_token grants"""
+    try:
+        form_data = await request.form()
+        grant_type = form_data.get("grant_type")
+
+        if grant_type == "authorization_code":
+            code = form_data.get("code")
+            client_id = form_data.get("client_id")
+            code_verifier = form_data.get("code_verifier")
+            redirect_uri = form_data.get("redirect_uri")
+
+            # Validate authorization code
+            if code not in auth_storage:
+                raise HTTPException(status_code=400, detail="Invalid authorization code")
+
+            auth_data = auth_storage[code]
+
+            # Check expiration
+            if datetime.now(timezone.utc).timestamp() > auth_data["expires_at"]:
+                del auth_storage[code]
+                raise HTTPException(status_code=400, detail="Authorization code expired")
+
+            # Validate PKCE (skip validation for test challenge)
+            if auth_data["code_challenge"] != "test_challenge":
+                import hashlib
+                import base64
+                expected_challenge = base64.urlsafe_b64encode(
+                    hashlib.sha256(code_verifier.encode()).digest()
+                ).decode().rstrip('=')
+
+                if expected_challenge != auth_data["code_challenge"]:
+                    raise HTTPException(status_code=400, detail="Invalid code verifier")
+
+            # Validate client and redirect URI
+            if client_id != auth_data["client_id"] or redirect_uri != auth_data["redirect_uri"]:
+                raise HTTPException(status_code=400, detail="Client or redirect URI mismatch")
+
+            # Clean up used code
+            del auth_storage[code]
+
+            # Generate tokens
+            import secrets
+            access_token = f"mcp_access_{secrets.token_hex(32)}"
+            refresh_token = f"mcp_refresh_{secrets.token_hex(32)}"
+
+            # Store tokens for validation (in production, use secure storage)
+            token_storage[access_token] = {
+                "user_id": auth_data["user_id"],
+                "client_id": client_id,
+                "expires_at": datetime.now(timezone.utc).timestamp() + 3600,  # 1 hour
+                "scope": "claudeai"
+            }
+
+            refresh_storage[refresh_token] = {
+                "user_id": auth_data["user_id"],
+                "client_id": client_id,
+                "expires_at": datetime.now(timezone.utc).timestamp() + 2592000,  # 30 days
+            }
+
+            return {
+                "access_token": access_token,
+                "token_type": "Bearer",
+                "expires_in": 3600,
+                "refresh_token": refresh_token,
+                "scope": "claudeai"
+            }
+
+        elif grant_type == "refresh_token":
+            refresh_token = form_data.get("refresh_token")
+            client_id = form_data.get("client_id")
+
+            if refresh_token not in refresh_storage:
+                raise HTTPException(status_code=400, detail="Invalid refresh token")
+
+            refresh_data = refresh_storage[refresh_token]
+
+            if datetime.now(timezone.utc).timestamp() > refresh_data["expires_at"]:
+                del refresh_storage[refresh_token]
+                raise HTTPException(status_code=400, detail="Refresh token expired")
+
+            if client_id != refresh_data["client_id"]:
+                raise HTTPException(status_code=400, detail="Client ID mismatch")
+
+            # Generate new access token
+            import secrets
+            access_token = f"mcp_access_{secrets.token_hex(32)}"
+
+            token_storage[access_token] = {
+                "user_id": refresh_data["user_id"],
+                "client_id": client_id,
+                "expires_at": datetime.now(timezone.utc).timestamp() + 3600,
+                "scope": "claudeai"
+            }
+
+            return {
+                "access_token": access_token,
+                "token_type": "Bearer",
+                "expires_in": 3600,
+                "scope": "claudeai"
+            }
+
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported grant type")
+
+    except Exception as e:
+        logger.error(f"Token exchange error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+# In-memory storage for demo (use secure storage in production)
+auth_storage = {}  # authorization codes
+token_storage = {}  # access tokens
+refresh_storage = {}  # refresh tokens
+
+# MCP Protocol Endpoints
+async def get_bearer_token(authorization: str = Header(None)) -> str:
+    """Extract and validate bearer token for Claude"""
+    if not authorization or not authorization.startswith("Bearer "):
+        # Return proper WWW-Authenticate header as per OAuth spec
+        raise HTTPException(
+            status_code=401,
+            detail="Unauthorized",
+            headers={"WWW-Authenticate": 'Bearer realm="mcp", authorization_uri="/.well-known/oauth-protected-resource"'}
         )
-        logger.info("Monarch Money login successful.")
-    except RequireMFAException:
-        logger.error("Monarch Money login failed: MFA is required. "
-                     "Provide MONARCH_MFA_SECRET in .env for non-interactive login.")
-        # Return an error structure recognizable by the client/LLM
-        return [{"error": "Failed to log in to Monarch Money: MFA Required. Check server logs and .env configuration."}]
-    except Exception as e:
-        logger.error(f"Monarch Money login failed: {e}")
-        # Return an error structure recognizable by the client/LLM
-        return [{"error": f"Failed to log in to Monarch Money: {e}. Check server logs."}]
 
-    # --- Fetch Accounts ---
-    logger.info("Fetching Monarch Money accounts...")
-    try:
-        # The get_accounts() method returns a dict like {'accounts': [...]}
-        result = await mm_client.get_accounts()
-        # FastMCP handles serialization of basic types and Pydantic models
-        accounts_list = result.get('accounts', [])
-        logger.info(f"Successfully fetched {len(accounts_list)} accounts.")
-        return accounts_list
-    except Exception as e:
-        logger.error(f"Error fetching Monarch accounts: {e}")
-        # Return an error structure recognizable by the client/LLM
-        return [{"error": f"An error occurred while fetching accounts: {e}"}]
+    token = authorization.split(" ", 1)[1]
 
-@mcp.tool()
-async def get_transactions(start_date: str | None = None, end_date: str | None = None, limit: int = 100) -> list[dict]:
-    """
-    Retrieves transactions from Monarch Money, optionally filtered by date range.
-    Defaults to the last 100 transactions if no date range or limit is provided.
-    Args:
-        start_date: Optional. Start date in 'YYYY-MM-DD' format.
-        end_date: Optional. End date in 'YYYY-MM-DD' format.
-        limit: Optional. Maximum number of transactions to return. Defaults to 100.
-    Returns:
-        A list of transaction dictionaries or an error dictionary.
-    """
-    # --- Monarch Money Client & Login ---
-    if not MONARCH_EMAIL or not MONARCH_PASSWORD:
-        logger.error("Cannot proceed: Email or password not configured in .env.")
-        return [{"error": "Monarch Money email or password not configured on the server."}]
-
-    mm_client = MonarchMoney()
-    logger.info(f"Attempting to log in to Monarch Money for get_transactions...")
-    try:
-        await mm_client.login(
-            email=MONARCH_EMAIL,
-            password=MONARCH_PASSWORD,
-            mfa_secret_key=MONARCH_MFA_SECRET,
-            save_session=False, # Explicitly disable saving session
-            use_saved_session=False # Explicitly disable using saved session
+    # Validate token exists and hasn't expired
+    if token not in token_storage:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid access token",
+            headers={"WWW-Authenticate": 'Bearer realm="mcp", authorization_uri="/.well-known/oauth-protected-resource"'}
         )
-        logger.info("Monarch Money login successful for get_transactions.")
-    except RequireMFAException:
-        logger.error("Monarch Money login failed: MFA required.")
-        return [{"error": "Failed to log in to Monarch Money: MFA Required. Check server logs and .env configuration."}]
-    except Exception as e:
-        logger.error(f"Monarch Money login failed: {e}")
-        return [{"error": f"Failed to log in to Monarch Money: {e}. Check server logs."}]
 
-    # --- Fetch Transactions ---
-    logger.info(f"Fetching Monarch Money transactions (limit: {limit}, start: {start_date}, end: {end_date})...")
-    try:
-        # Note: The underlying library might have slightly different parameter names or expect datetime objects.
-        # Adjustments may be needed based on testing or more detailed library docs.
-        # Common parameters might include `offset`, `is_pending`, etc. which are omitted for simplicity here.
-        logger.info("Attempting to call mm_client.get_transactions...")
-        result = await mm_client.get_transactions(
-            limit=limit,
-            start_date=start_date, # Assuming library accepts 'YYYY-MM-DD' strings
-            end_date=end_date      # Assuming library accepts 'YYYY-MM-DD' strings
+    token_data = token_storage[token]
+    if datetime.now(timezone.utc).timestamp() > token_data["expires_at"]:
+        del token_storage[token]
+        raise HTTPException(
+            status_code=401,
+            detail="Access token expired",
+            headers={"WWW-Authenticate": 'Bearer realm="mcp", authorization_uri="/.well-known/oauth-protected-resource"'}
         )
-        logger.info(f"Successfully received result from mm_client.get_transactions. Type: {type(result)}")
-        logger.info(f"Raw result dict from library: {result}")
-        # The actual key for the list might differ, consult library source or test response if needed
-        # Accessing the structure based on direct library output: result -> allTransactions -> results
-        all_transactions_data = result.get('allTransactions', {})
-        transactions_list = all_transactions_data.get('results', [])
-        logger.info(f"Successfully fetched {len(transactions_list)} transactions using key path 'allTransactions.results'.")
-        return transactions_list
-    except Exception as e:
-        # Log the specific exception type and message
-        logger.error(f"Error during Monarch transactions fetch: {type(e).__name__} - {e}", exc_info=True)
-        return [{"error": f"An error occurred while fetching transactions: {type(e).__name__} - {e}"}]
 
-@mcp.tool()
-async def get_cashflow_summary() -> dict:
-    """
-    Retrieves the cash flow summary (income, expenses, savings rate) from Monarch Money.
-    Returns:
-        A dictionary containing the cash flow summary or an error dictionary.
-    """
-    # --- Monarch Money Client & Login ---
-    if not MONARCH_EMAIL or not MONARCH_PASSWORD:
-        logger.error("Cannot proceed: Email or password not configured in .env.")
-        return {"error": "Monarch Money email or password not configured on the server."}
+    return token
 
-    mm_client = MonarchMoney()
-    logger.info(f"Attempting to log in to Monarch Money for get_cashflow_summary...")
+@app.post("/mcp/rpc")
+async def mcp_rpc(request: Request, token: str = Depends(get_bearer_token)):
+    """MCP JSON-RPC endpoint"""
     try:
-        await mm_client.login(
-            email=MONARCH_EMAIL,
-            password=MONARCH_PASSWORD,
-            mfa_secret_key=MONARCH_MFA_SECRET,
-            save_session=False, # Explicitly disable saving session
-            use_saved_session=False # Explicitly disable using saved session
-        )
-        logger.info("Monarch Money login successful for get_cashflow_summary.")
-    except RequireMFAException:
-        logger.error("Monarch Money login failed: MFA required.")
-        return {"error": "Failed to log in to Monarch Money: MFA Required. Check server logs and .env configuration."}
+        body = await request.json()
+
+        method = body.get("method")
+        params = body.get("params", {})
+        request_id = body.get("id")
+
+        logger.info(f"MCP RPC call: {method}")
+
+        if method == "initialize":
+            response = {
+                "jsonrpc": "2.0",
+                "result": {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {
+                        "tools": {
+                            "listChanged": False
+                        }
+                    },
+                    "serverInfo": {
+                        "name": config.server_name,
+                        "version": config.server_version,
+                        "description": "Monarch Money MCP Server for Claude Custom Connectors"
+                    }
+                },
+                "id": request_id
+            }
+
+        elif method == "tools/list":
+            # Return tools list directly for Claude
+            response = {
+                "jsonrpc": "2.0",
+                "result": {
+                    "tools": [
+                        {
+                            "name": "get_accounts",
+                            "description": "Get all Monarch Money accounts with balances and details",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {},
+                                "required": []
+                            }
+                        },
+                        {
+                            "name": "get_transactions",
+                            "description": "Get Monarch Money transactions with optional filtering",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "start_date": {"type": "string", "description": "Start date in YYYY-MM-DD format"},
+                                    "end_date": {"type": "string", "description": "End date in YYYY-MM-DD format"},
+                                    "limit": {"type": "integer", "description": "Maximum number of transactions", "default": 100},
+                                    "account_id": {"type": "string", "description": "Optional account ID filter"}
+                                },
+                                "required": []
+                            }
+                        },
+                        {
+                            "name": "get_budgets",
+                            "description": "Get Monarch Money budget information and categories",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {},
+                                "required": []
+                            }
+                        }
+                    ]
+                },
+                "id": request_id
+            }
+
+        elif method == "tools/call":
+            tool_name = params.get("name")
+            arguments = params.get("arguments", {})
+
+            if not tool_name:
+                raise HTTPException(status_code=400, detail="Missing tool name")
+
+            # Import and call the tools directly
+            sys.path.append(os.path.dirname(__file__))
+            import fastmcp_server
+
+            # Call the appropriate tool function
+            if tool_name == "get_accounts":
+                result_text = await fastmcp_server.get_accounts()
+            elif tool_name == "get_transactions":
+                result_text = await fastmcp_server.get_transactions(**arguments)
+            elif tool_name == "get_budgets":
+                result_text = await fastmcp_server.get_budgets()
+            elif tool_name == "get_spending_plan":
+                result_text = await fastmcp_server.get_spending_plan(**arguments)
+            elif tool_name == "get_account_history":
+                result_text = await fastmcp_server.get_account_history(**arguments)
+            else:
+                raise HTTPException(status_code=400, detail=f"Unknown tool: {tool_name}")
+
+            response = {
+                "jsonrpc": "2.0",
+                "result": {
+                    "content": [{"type": "text", "text": result_text}]
+                },
+                "id": request_id
+            }
+
+        else:
+            response = {
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32601,
+                    "message": f"Method not found: {method}"
+                },
+                "id": request_id
+            }
+
+        return response
+
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Monarch Money login failed: {e}")
-        return {"error": f"Failed to log in to Monarch Money: {e}. Check server logs."}
+        logger.error(f"MCP RPC error: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
 
-    # --- Fetch Cashflow Summary ---
-    logger.info(f"Fetching Monarch Money cash flow summary...")
-    try:
-        summary_data = await mm_client.get_cashflow_summary()
-        # Assuming the library returns the dictionary directly
-        logger.info(f"Successfully fetched cash flow summary.")
-        return summary_data
-    except Exception as e:
-        logger.error(f"Error fetching Monarch cash flow summary: {e}")
-        return {"error": f"An error occurred while fetching the cash flow summary: {e}"}
+        return {
+            "jsonrpc": "2.0",
+            "error": {
+                "code": -32603,
+                "message": f"Internal error: {str(e)}"
+            },
+            "id": body.get("id") if 'body' in locals() else None
+        }
 
-@mcp.tool()
-async def get_account_history(account_id: int) -> list[dict]:
-    """
-    Retrieves the daily balance history for a specific account.
-    Args:
-        account_id: The ID of the account to fetch history for.
-    Returns:
-        A list of history dictionaries or an error dictionary.
-    """
-    # --- Monarch Money Client & Login ---
-    if not MONARCH_EMAIL or not MONARCH_PASSWORD:
-        logger.error("Cannot proceed: Email or password not configured in .env.")
-        # Return list with error dict to match expected return type hint
-        return [{"error": "Monarch Money email or password not configured on the server."}]
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "version": config.server_version,
+        "protocol_version": config.protocol_version
+    }
 
-    mm_client = MonarchMoney()
-    logger.info(f"Attempting to log in to Monarch Money for get_account_history (account: {account_id})...")
-    try:
-        await mm_client.login(
-            email=MONARCH_EMAIL,
-            password=MONARCH_PASSWORD,
-            mfa_secret_key=MONARCH_MFA_SECRET,
-            save_session=False, # Explicitly disable saving session
-            use_saved_session=False # Explicitly disable using saved session
-        )
-        logger.info("Monarch Money login successful for get_account_history.")
-    except RequireMFAException:
-        logger.error("Monarch Money login failed: MFA required.")
-        return [{"error": "Failed to log in to Monarch Money: MFA Required. Check server logs and .env configuration."}]
-    except Exception as e:
-        logger.error(f"Monarch Money login failed: {e}")
-        return [{"error": f"Failed to log in to Monarch Money: {e}. Check server logs."}]
+@app.get("/")
+async def root():
+    """Root endpoint with server information"""
+    base_url = os.getenv("BASE_URL", "https://cesar-money-mcp.vercel.app")
 
-    # --- Fetch Account History ---
-    logger.info(f"Fetching Monarch Money account history for account ID: {account_id}...")
-    try:
-        # Pass the account_id to the library function
-        # The library's get_account_history function already processes the response
-        # and returns the list of history dictionaries directly.
-        history_list = await mm_client.get_account_history(account_id=account_id)
+    return {
+        "name": "Monarch Money MCP Server",
+        "version": "1.0.0",
+        "description": "Monarch Money MCP Server for Claude Custom Connectors",
+        "mcp_endpoint": f"{base_url}/mcp",
+        "endpoints": {
+            "mcp_rpc": f"{base_url}/mcp/rpc",
+            "oauth_authorize": f"{base_url}/oauth/authorize",
+            "oauth_token": f"{base_url}/oauth/token",
+            "health": f"{base_url}/health"
+        },
+        "oauth_metadata": f"{base_url}/.well-known/oauth-authorization-server",
+        "instructions": {
+            "claude_setup": f"Add this URL to Claude Custom Connectors: {base_url}/mcp",
+            "oauth_client_id": "claude-mcp-client",
+            "oauth_client_secret": "mcp-secret-2024"
+        }
+    }
 
-        # Check if the result is an error (list containing a single dict with 'error' key)
-        if isinstance(history_list, list) and len(history_list) == 1 and 'error' in history_list[0]:
-             logger.error(f"Library call returned an error for account {account_id}: {history_list[0]['error']}")
-             # Propagate the error structure
-             return history_list
-        elif not isinstance(history_list, list):
-            # Handle unexpected return types (though the library should return list or raise)
-            logger.error(f"Unexpected return type from get_account_history for account {account_id}: {type(history_list)}")
-            return [{"error": f"Unexpected data structure received for account history: {type(history_list).__name__}"}]
+# Main MCP endpoint that Claude expects
+@app.get("/mcp")
+async def mcp_endpoint():
+    """Main MCP endpoint for Claude Custom Connectors"""
+    base_url = os.getenv("BASE_URL", "https://cesar-money-mcp.vercel.app")
 
-        logger.info(f"Successfully fetched {len(history_list)} history entries for account {account_id}.")
-        return history_list
-    except Exception as e:
-        logger.error(f"Error fetching Monarch account history for account {account_id}: {e}", exc_info=True) # Added exc_info
-        return [{"error": f"An error occurred while fetching account history: {type(e).__name__} - {e}"}]
+    return {
+        "version": "2025-06-18",
+        "capabilities": {
+            "tools": True,
+            "resources": False,
+            "prompts": False
+        },
+        "serverInfo": {
+            "name": "Monarch Money MCP Server",
+            "version": "1.0.0"
+        },
+        "endpoints": {
+            "rpc": f"{base_url}/mcp/rpc"
+        },
+        "authentication": {
+            "type": "oauth2",
+            "authorization_url": f"{base_url}/oauth/authorize",
+            "token_url": f"{base_url}/oauth/token"
+        }
+    }
 
-@mcp.tool()
-async def get_account_holdings(account_id: int) -> list[dict]:
-    """
-    Retrieves all securities (holdings) in a brokerage or similar investment account.
-    Args:
-        account_id: The ID of the investment account.
-    Returns:
-        A list of holding dictionaries or an error dictionary.
-    """
-    # --- Monarch Money Client & Login ---
-    if not MONARCH_EMAIL or not MONARCH_PASSWORD:
-        logger.error("Cannot proceed: Email or password not configured in .env.")
-        return [{"error": "Monarch Money email or password not configured on the server."}]
-
-    mm_client = MonarchMoney()
-    logger.info(f"Attempting to log in to Monarch Money for get_account_holdings (account: {account_id})...")
-    try:
-        await mm_client.login(
-            email=MONARCH_EMAIL,
-            password=MONARCH_PASSWORD,
-            mfa_secret_key=MONARCH_MFA_SECRET,
-            save_session=False, # Explicitly disable saving session
-            use_saved_session=False # Explicitly disable using saved session
-        )
-        logger.info("Monarch Money login successful for get_account_holdings.")
-    except RequireMFAException:
-        logger.error("Monarch Money login failed: MFA required.")
-        return [{"error": "Failed to log in to Monarch Money: MFA Required. Check server logs and .env configuration."}]
-    except Exception as e:
-        logger.error(f"Monarch Money login failed: {e}")
-        return [{"error": f"Failed to log in to Monarch Money: {e}. Check server logs."}]
-
-    # --- Fetch Account Holdings ---
-    logger.info(f"Fetching Monarch Money account holdings for account ID: {account_id}...")
-    try:
-        # Pass the account_id to the library function
-        holdings_data = await mm_client.get_account_holdings(account_id=account_id)
-        # Assuming the library returns a structure like {'holdings': [...]} - adjust key if needed
-        holdings_list = holdings_data.get('holdings', []) # Adjust key if needed
-        logger.info(f"Successfully fetched {len(holdings_list)} holdings for account {account_id}.")
-        return holdings_list
-    except Exception as e:
-        logger.error(f"Error fetching Monarch account holdings for account {account_id}: {e}")
-        return [{"error": f"An error occurred while fetching account holdings: {e}"}]
-
-@mcp.tool()
-async def get_transactions_summary() -> dict:
-    """
-    Retrieves the transaction summary data (e.g., totals for a period) from Monarch Money.
-    Returns:
-        A dictionary containing the transaction summary or an error dictionary.
-    """
-    # --- Monarch Money Client & Login ---
-    if not MONARCH_EMAIL or not MONARCH_PASSWORD:
-        logger.error("Cannot proceed: Email or password not configured in .env.")
-        return {"error": "Monarch Money email or password not configured on the server."}
-
-    mm_client = MonarchMoney()
-    logger.info(f"Attempting to log in to Monarch Money for get_transactions_summary...")
-    try:
-        await mm_client.login(
-            email=MONARCH_EMAIL,
-            password=MONARCH_PASSWORD,
-            mfa_secret_key=MONARCH_MFA_SECRET,
-            save_session=False, # Explicitly disable saving session
-            use_saved_session=False # Explicitly disable using saved session
-        )
-        logger.info("Monarch Money login successful for get_transactions_summary.")
-    except RequireMFAException:
-        logger.error("Monarch Money login failed: MFA required.")
-        return {"error": "Failed to log in to Monarch Money: MFA Required. Check server logs and .env configuration."}
-    except Exception as e:
-        logger.error(f"Monarch Money login failed: {e}")
-        return {"error": f"Failed to log in to Monarch Money: {e}. Check server logs."}
-
-    # --- Fetch Transactions Summary ---
-    logger.info(f"Fetching Monarch Money transactions summary...")
-    try:
-        summary_data = await mm_client.get_transactions_summary()
-        # Assuming the library returns the summary dictionary directly
-        logger.info(f"Successfully fetched transactions summary.")
-        return summary_data
-    except Exception as e:
-        logger.error(f"Error fetching Monarch transactions summary: {e}")
-        return {"error": f"An error occurred while fetching the transactions summary: {e}"}
-
-@mcp.tool()
-async def get_account_type_options() -> dict:
-    """
-    Retrieves all account types and their subtypes available in Monarch Money.
-    Corresponds to the get_account_type_options method in the hammem/monarchmoney library.
-    Returns:
-        A dictionary containing account types and subtypes or an error dictionary.
-    """
-    # --- Monarch Money Client & Login ---
-    if not MONARCH_EMAIL or not MONARCH_PASSWORD:
-        logger.error("Cannot proceed: Email or password not configured in .env.")
-        return {"error": "Monarch Money email or password not configured on the server."}
-
-    mm_client = MonarchMoney()
-    logger.info(f"Attempting to log in to Monarch Money for get_account_type_options...")
-    try:
-        await mm_client.login(
-            email=MONARCH_EMAIL,
-            password=MONARCH_PASSWORD,
-            mfa_secret_key=MONARCH_MFA_SECRET,
-            save_session=False, # Explicitly disable saving session
-            use_saved_session=False # Explicitly disable using saved session
-        )
-        logger.info("Monarch Money login successful for get_account_type_options.")
-    except RequireMFAException:
-        logger.error("Monarch Money login failed: MFA required.")
-        return {"error": "Failed to log in to Monarch Money: MFA Required. Check server logs and .env configuration."}
-    except Exception as e:
-        logger.error(f"Monarch Money login failed: {e}")
-        return {"error": f"Failed to log in to Monarch Money: {e}. Check server logs."}
-
-    # --- Fetch Account Type Options ---
-    logger.info(f"Fetching Monarch Money account type options...")
-    try:
-        options_data = await mm_client.get_account_type_options()
-        # Assuming the library returns the dictionary directly
-        logger.info(f"Successfully fetched account type options.")
-        return options_data
-    except Exception as e:
-        logger.error(f"Error fetching Monarch account type options: {e}")
-        return {"error": f"An error occurred while fetching account type options: {e}"}
-
-@mcp.tool()
-async def get_institutions() -> list[dict]:
-    """
-    Retrieves institutions linked to Monarch Money.
-    Corresponds to the get_institutions method in the hammem/monarchmoney library.
-    Returns:
-        A list of institution dictionaries or an error dictionary.
-    """
-    # --- Monarch Money Client & Login ---
-    if not MONARCH_EMAIL or not MONARCH_PASSWORD:
-        logger.error("Cannot proceed: Email or password not configured in .env.")
-        return [{"error": "Monarch Money email or password not configured on the server."}]
-
-    mm_client = MonarchMoney()
-    logger.info(f"Attempting to log in to Monarch Money for get_institutions...")
-    # Add logging to verify loaded credentials
-    logger.info(f"Using Email: {MONARCH_EMAIL}")
-    logger.info(f"Password loaded: {'Yes' if MONARCH_PASSWORD else 'No'}")
-    logger.info(f"MFA Secret loaded: {'Yes' if MONARCH_MFA_SECRET else 'No'}")
-    try:
-        await mm_client.login(
-            email=MONARCH_EMAIL,
-            password=MONARCH_PASSWORD,
-            mfa_secret_key=MONARCH_MFA_SECRET,
-            save_session=False, # Explicitly disable saving session
-            use_saved_session=False # Explicitly disable using saved session
-        )
-        logger.info("Monarch Money login successful for get_institutions.")
-    except RequireMFAException:
-        logger.error("Monarch Money login failed: MFA required.")
-        return [{"error": "Failed to log in to Monarch Money: MFA Required. Check server logs and .env configuration."}]
-    except Exception as e:
-        logger.error(f"Monarch Money login failed: {e}")
-        return [{"error": f"Failed to log in to Monarch Money: {e}. Check server logs."}]
-
-    # --- Fetch Institutions ---
-    logger.info(f"Fetching Monarch Money institutions...")
-    try:
-        # The library function likely returns the raw GraphQL response
-        response_data = await mm_client.get_institutions()
-        # Extract institutions from the 'credentials' list in the response data
-        credentials = response_data.get('credentials', [])
-        institutions_set = set() # Use a set to store unique institution IDs
-        institutions_list = []
-        for cred in credentials:
-            inst = cred.get('institution')
-            if inst and inst.get('id') not in institutions_set:
-                institutions_set.add(inst.get('id'))
-                institutions_list.append(inst)
-
-        logger.info(f"Successfully extracted {len(institutions_list)} unique institutions.")
-        return institutions_list
-    except Exception as e:
-        logger.error(f"Error fetching/parsing Monarch institutions: {e}", exc_info=True) # Add exc_info for better debugging
-        return [{"error": f"An error occurred while fetching institutions: {e}"}]
-
-@mcp.tool()
-async def get_budgets(start_date: str | None = None, end_date: str | None = None) -> dict:
-    """
-    Retrieves budgets and corresponding actual amounts from Monarch Money for a given period.
-    Defaults to the period covering the previous month, current month, and next month if no dates are provided.
-    Corresponds to the get_budgets method in the hammem/monarchmoney library.
-    Args:
-        start_date: Optional. The earliest date to get budget data, in "YYYY-MM-DD" format.
-        end_date: Optional. The latest date to get budget data, in "YYYY-MM-DD" format.
-    Returns:
-        A dictionary containing budget data or an error dictionary.
-    """
-    # --- Monarch Money Client & Login ---
-    if not MONARCH_EMAIL or not MONARCH_PASSWORD:
-        logger.error("Cannot proceed: Email or password not configured in .env.")
-        return {"error": "Monarch Money email or password not configured on the server."}
-
-    # --- Date Handling (matching reference.py logic) ---
-    if bool(start_date) != bool(end_date):
-        logger.error("Both start_date and end_date must be provided, or neither.")
-        return {"error": "Invalid date parameters: Provide both start_date and end_date, or neither."}
-
-    if not start_date: # If start_date is None, end_date must also be None
-        today = datetime.today()
-        # Get the first day of last month
-        first_day_current_month = today.replace(day=1)
-        last_day_last_month = first_day_current_month - timedelta(days=1)
-        start_date = last_day_last_month.replace(day=1).strftime("%Y-%m-%d")
-
-        # Get the last day of next month
-        # Move to the first day of the current month, add 2 months, then subtract 1 day
-        # This handles year rollovers correctly
-        first_day_next_next_month = (first_day_current_month.replace(year=today.year + (today.month + 1) // 13, 
-                                                                    month=(today.month + 1) % 12 + 1))
-        end_date = (first_day_next_next_month - timedelta(days=1)).strftime("%Y-%m-%d")
-        logger.info(f"No dates provided, defaulting to start_date={start_date}, end_date={end_date}")
-
-
-    mm_client = MonarchMoney()
-    logger.info(f"Attempting to log in to Monarch Money for get_budgets...")
-    # Add logging to verify loaded credentials
-    logger.info(f"Using Email: {MONARCH_EMAIL}")
-    logger.info(f"Password loaded: {'Yes' if MONARCH_PASSWORD else 'No'}")
-    logger.info(f"MFA Secret loaded: {'Yes' if MONARCH_MFA_SECRET else 'No'}")
-    try:
-        await mm_client.login(
-            email=MONARCH_EMAIL,
-            password=MONARCH_PASSWORD,
-            mfa_secret_key=MONARCH_MFA_SECRET,
-            save_session=False, # Explicitly disable saving session
-            use_saved_session=False # Explicitly disable using saved session
-        )
-        logger.info("Monarch Money login successful for get_budgets.")
-    except RequireMFAException:
-        logger.error("Monarch Money login failed: MFA required.")
-        return {"error": "Failed to log in to Monarch Money: MFA Required. Check server logs and .env configuration."}
-    except Exception as e:
-        logger.error(f"Monarch Money login failed: {e}")
-        return {"error": f"Failed to log in to Monarch Money: {e}. Check server logs."}
-
-    # --- Fetch Budgets ---
-    logger.info(f"Fetching Monarch Money budgets (start={start_date}, end={end_date})...")
-    try:
-        # Call the library function with potentially defaulted dates
-        # Do NOT pass useLegacyGoals or useV2Goals based on reference.py
-        budgets_data = await mm_client.get_budgets(start_date=start_date, end_date=end_date)
-        logger.info(f"Successfully fetched budgets data. Type: {type(budgets_data)}")
-        # logger.info(f"Budgets data sample: {str(budgets_data)[:500]}") # Log snippet if needed
-        return budgets_data
-    except Exception as e:
-        logger.error(f"Error fetching Monarch budgets: {e}", exc_info=True)
-        return {"error": f"An error occurred while fetching budgets: {e}"}
-
-@mcp.tool()
-async def get_recurring_transactions(start_date: str | None = None, end_date: str | None = None) -> list[dict]:
-    """
-    Fetches upcoming recurring transactions from Monarch Money for a given period.
-    Defaults to the current month if no dates are provided.
-    Args:
-        start_date: Optional. The earliest date to get transactions from, in "YYYY-MM-DD" format.
-        end_date: Optional. The latest date to get transactions from, in "YYYY-MM-DD" format.
-    Returns:
-        A list of recurring transaction item dictionaries or an error dictionary.
-    """
-    # --- Monarch Money Client & Login ---
-    if not MONARCH_EMAIL or not MONARCH_PASSWORD:
-        logger.error("Cannot proceed: Email or password not configured in .env.")
-        return [{"error": "Monarch Money email or password not configured on the server."}]
-
-    # --- Date Handling (matching reference.py logic) ---
-    if bool(start_date) != bool(end_date):
-        logger.error("Both start_date and end_date must be provided, or neither.")
-        return [{"error": "Invalid date parameters: Provide both start_date and end_date, or neither."}]
-
-    if not start_date: # If start_date is None, end_date must also be None
-        today = datetime.today()
-        # Get the first day of the current month
-        start_date = today.replace(day=1).strftime("%Y-%m-%d")
-        # Get the last day of the current month
-        _, last_day = calendar.monthrange(today.year, today.month)
-        end_date = today.replace(day=last_day).strftime("%Y-%m-%d")
-        logger.info(f"No dates provided, defaulting to current month: start_date={start_date}, end_date={end_date}")
-
-    mm_client = MonarchMoney()
-    logger.info(f"Attempting to log in to Monarch Money for get_recurring_transactions...")
-    try:
-        await mm_client.login(
-            email=MONARCH_EMAIL,
-            password=MONARCH_PASSWORD,
-            mfa_secret_key=MONARCH_MFA_SECRET,
-            save_session=False,
-            use_saved_session=False
-        )
-        logger.info("Monarch Money login successful for get_recurring_transactions.")
-    except RequireMFAException:
-        logger.error("Monarch Money login failed: MFA required.")
-        return [{"error": "Failed to log in to Monarch Money: MFA Required. Check server logs and .env configuration."}]
-    except Exception as e:
-        logger.error(f"Monarch Money login failed: {e}")
-        return [{"error": f"Failed to log in to Monarch Money: {e}. Check server logs."}]
-
-    # --- Fetch Recurring Transactions ---
-    logger.info(f"Fetching Monarch Money recurring transactions (start={start_date}, end={end_date})...")
-    try:
-        # Call the library function with the specified or defaulted dates
-        result_data = await mm_client.get_recurring_transactions(start_date=start_date, end_date=end_date)
-        logger.info(f"Successfully fetched recurring transactions data. Type: {type(result_data)}")
-        # Extract the list of transactions from the response, likely under 'recurringTransactionItems' key
-        recurring_transactions_list = result_data.get('recurringTransactionItems', [])
-        logger.info(f"Successfully extracted {len(recurring_transactions_list)} recurring transactions.")
-        return recurring_transactions_list
-    except Exception as e:
-        logger.error(f"Error fetching Monarch recurring transactions: {e}", exc_info=True)
-        return [{"error": f"An error occurred while fetching recurring transactions: {e}"}]
-
-@mcp.tool()
-async def get_transaction_categories() -> list[dict]:
-    """
-    Retrieves all transaction categories configured in the Monarch Money account.
-    Corresponds to the get_transaction_categories method in the hammem/monarchmoney library.
-    Returns:
-        A list of category dictionaries or an error dictionary.
-    """
-    # --- Monarch Money Client & Login ---
-    if not MONARCH_EMAIL or not MONARCH_PASSWORD:
-        logger.error("Cannot proceed: Email or password not configured in .env.")
-        return [{"error": "Monarch Money email or password not configured on the server."}]
-
-    mm_client = MonarchMoney()
-    logger.info(f"Attempting to log in to Monarch Money for get_transaction_categories...")
-    try:
-        await mm_client.login(
-            email=MONARCH_EMAIL,
-            password=MONARCH_PASSWORD,
-            mfa_secret_key=MONARCH_MFA_SECRET,
-            save_session=False,
-            use_saved_session=False
-        )
-        logger.info("Monarch Money login successful for get_transaction_categories.")
-    except RequireMFAException:
-        logger.error("Monarch Money login failed: MFA required.")
-        return [{"error": "Failed to log in to Monarch Money: MFA Required. Check server logs and .env configuration."}]
-    except Exception as e:
-        logger.error(f"Monarch Money login failed: {e}")
-        return [{"error": f"Failed to log in to Monarch Money: {e}. Check server logs."}]
-
-    # --- Fetch Transaction Categories ---
-    logger.info(f"Fetching Monarch Money transaction categories...")
-    try:
-        # Call the library function
-        result_data = await mm_client.get_transaction_categories()
-        logger.info(f"Successfully fetched transaction categories data. Type: {type(result_data)}")
-        # Extract the list of categories from the response, likely under 'categories' key based on reference.py
-        categories_list = result_data.get('categories', [])
-        logger.info(f"Successfully extracted {len(categories_list)} transaction categories.")
-        return categories_list
-    except Exception as e:
-        logger.error(f"Error fetching Monarch transaction categories: {e}", exc_info=True)
-        return [{"error": f"An error occurred while fetching transaction categories: {e}"}]
-
-@mcp.tool()
-async def get_transaction_category_groups() -> list[dict]:
-    """
-    Retrieves all transaction category groups configured in the Monarch Money account.
-    Corresponds to the get_transaction_category_groups method in the hammem/monarchmoney library.
-    Returns:
-        A list of category group dictionaries or an error dictionary.
-    """
-    # --- Monarch Money Client & Login ---
-    if not MONARCH_EMAIL or not MONARCH_PASSWORD:
-        logger.error("Cannot proceed: Email or password not configured in .env.")
-        return [{"error": "Monarch Money email or password not configured on the server."}]
-
-    mm_client = MonarchMoney()
-    logger.info(f"Attempting to log in to Monarch Money for get_transaction_category_groups...")
-    try:
-        await mm_client.login(
-            email=MONARCH_EMAIL,
-            password=MONARCH_PASSWORD,
-            mfa_secret_key=MONARCH_MFA_SECRET,
-            save_session=False,
-            use_saved_session=False
-        )
-        logger.info("Monarch Money login successful for get_transaction_category_groups.")
-    except RequireMFAException:
-        logger.error("Monarch Money login failed: MFA required.")
-        return [{"error": "Failed to log in to Monarch Money: MFA Required. Check server logs and .env configuration."}]
-    except Exception as e:
-        logger.error(f"Monarch Money login failed: {e}")
-        return [{"error": f"Failed to log in to Monarch Money: {e}. Check server logs."}]
-
-    # --- Fetch Transaction Category Groups ---
-    logger.info(f"Fetching Monarch Money transaction category groups...")
-    try:
-        # Call the library function
-        result_data = await mm_client.get_transaction_category_groups()
-        logger.info(f"Successfully fetched transaction category groups data. Type: {type(result_data)}")
-        # Extract the list of groups from the response, likely under 'categoryGroups' key based on reference.py query
-        groups_list = result_data.get('categoryGroups', [])
-        logger.info(f"Successfully extracted {len(groups_list)} transaction category groups.")
-        return groups_list
-    except Exception as e:
-        logger.error(f"Error fetching Monarch transaction category groups: {e}", exc_info=True)
-        return [{"error": f"An error occurred while fetching transaction category groups: {e}"}]
-
-@mcp.tool()
-async def get_cashflow(
-    start_date: str | None = None,
-    end_date: str | None = None,
-    limit: int = 100, # DEFAULT_RECORD_LIMIT is 100 in reference.py
-) -> dict:
-    """
-    Gets cash flow data (income, expenses, savings by category/group/merchant) from Monarch Money.
-    Defaults to the current month if no date range is provided.
-    Corresponds to the get_cashflow method in the hammem/monarchmoney library.
-
-    Args:
-        limit: Optional. Maximum number of records for certain sub-queries (like merchants). Defaults to 100.
-        start_date: Optional. The earliest date to get cash flow data from, in "YYYY-MM-DD" format. Must be provided with end_date.
-        end_date: Optional. The latest date to get cash flow data from, in "YYYY-MM-DD" format. Must be provided with start_date.
-    Returns:
-        A dictionary containing cash flow data or an error dictionary.
-    """
-    # --- Monarch Money Client & Login ---
-    if not MONARCH_EMAIL or not MONARCH_PASSWORD:
-        logger.error("Cannot proceed: Email or password not configured in .env.")
-        return {"error": "Monarch Money email or password not configured on the server."}
-
-    # --- Date Handling (matching reference.py logic) ---
-    if bool(start_date) != bool(end_date):
-        logger.error("Both start_date and end_date must be provided, or neither.")
-        return {"error": "Invalid date parameters: Provide both start_date and end_date, or neither."}
-
-    if not start_date: # If start_date is None, end_date must also be None
-        today = datetime.today()
-        # Get the first day of the current month
-        start_date = today.replace(day=1).strftime("%Y-%m-%d")
-        # Get the last day of the current month
-        _, last_day = calendar.monthrange(today.year, today.month)
-        end_date = today.replace(day=last_day).strftime("%Y-%m-%d")
-        logger.info(f"No dates provided, defaulting to current month: start_date={start_date}, end_date={end_date}")
-
-    mm_client = MonarchMoney()
-    logger.info(f"Attempting to log in to Monarch Money for get_cashflow...")
-    try:
-        await mm_client.login(
-            email=MONARCH_EMAIL,
-            password=MONARCH_PASSWORD,
-            mfa_secret_key=MONARCH_MFA_SECRET,
-            save_session=False,
-            use_saved_session=False
-        )
-        logger.info("Monarch Money login successful for get_cashflow.")
-    except RequireMFAException:
-        logger.error("Monarch Money login failed: MFA required.")
-        return {"error": "Failed to log in to Monarch Money: MFA Required. Check server logs and .env configuration."}
-    except Exception as e:
-        logger.error(f"Monarch Money login failed: {e}")
-        return {"error": f"Failed to log in to Monarch Money: {e}. Check server logs."}
-
-    # --- Fetch Cash Flow Data ---
-    logger.info(f"Fetching Monarch Money cash flow data (limit={limit}, start={start_date}, end={end_date})...")
-    try:
-        # Call the library function with the specified or defaulted dates and limit
-        cashflow_data = await mm_client.get_cashflow(
-            limit=limit,
-            start_date=start_date,
-            end_date=end_date
-        )
-        logger.info(f"Successfully fetched cash flow data. Type: {type(cashflow_data)}")
-        # logger.info(f"Cash flow data sample: {str(cashflow_data)[:500]}") # Log snippet if needed
-        return cashflow_data
-    except Exception as e:
-        logger.error(f"Error fetching Monarch cash flow data: {e}", exc_info=True)
-        return {"error": f"An error occurred while fetching cash flow data: {e}"}
-
-# Add more tools here later...
-# e.g.
-# @mcp.tool()
-# async def get_transactions(...) -> ... :
-#    # Similar login and API call logic
-#    pass
-
-# --- Uvicorn Entry Point ---
 if __name__ == "__main__":
-    # Check for essential config before starting server
-    if not MONARCH_EMAIL or not MONARCH_PASSWORD:
-        logger.error("MONARCH_EMAIL and MONARCH_PASSWORD environment variables are required in .env file.")
-        logger.error("Server cannot start without credentials.")
-        # Exit or prevent uvicorn.run if essential config is missing
-        exit(1) # Or raise ConfigurationError("Credentials missing")
+    # Configuration
+    host = os.getenv("HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", "8000"))
+    reload = os.getenv("RELOAD", "false").lower() == "true"
 
-    logger.info("Starting Uvicorn server...")
-    # Run the server using uvicorn directly
-    # Pass the actual ASGI app provided by FastMCP via sse_app()
-    uvicorn.run(mcp.sse_app(), host="127.0.0.1", port=8000, log_level="info") 
+    logger.info(f"Starting Monarch Money MCP Server for Claude Custom Connectors")
+    logger.info(f"Host: {host}:{port}")
+    logger.info(f"Protocol Version: {config.protocol_version}")
+
+    # Run the server
+    uvicorn.run("claude_connector_server:app", host=host, port=port, reload=reload)
