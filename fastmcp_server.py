@@ -227,10 +227,10 @@ async def get_transactions(
             return "No transactions found for the specified criteria."
 
         summary = f"Found {len(transactions)} transactions"
-        if start_date and start_date is not None:
-            summary += f" from {str(start_date)}"
-        if end_date and end_date is not None:
-            summary += f" to {str(end_date)}"
+        if start_date:
+            summary += f" from {safe_str(start_date, 'Unknown')}"
+        if end_date:
+            summary += f" to {safe_str(end_date, 'Unknown')}"
         summary += f" (showing up to {limit}):\n\n"
 
         # Show first 20 transactions for readability
