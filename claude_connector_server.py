@@ -54,9 +54,9 @@ app = FastAPI(
 # CORS configuration for Claude compatibility
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify Claude's domains
+    allow_origins=["https://claude.ai", "https://claude.com", "http://localhost:*"],  # Claude domains + localhost for testing
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -72,9 +72,9 @@ async def oauth_metadata():
         "token_endpoint": f"{base_url}/oauth/token",
         "registration_endpoint": f"{base_url}/oauth/register",
         "response_types_supported": ["code"],
-        "grant_types_supported": ["authorization_code"],
+        "grant_types_supported": ["authorization_code", "refresh_token"],
         "code_challenge_methods_supported": ["S256"],
-        "token_endpoint_auth_methods_supported": ["client_secret_post"],
+        "token_endpoint_auth_methods_supported": ["none"],
         "scopes_supported": ["accounts:read", "transactions:read", "budgets:read"]
     }
 
@@ -91,21 +91,33 @@ async def protected_resource_metadata():
         "scopes_supported": ["accounts:read", "transactions:read", "budgets:read"]
     }
 
-# Simplified OAuth for Claude Custom Connectors
+# Dynamic Client Registration (RFC 7591) - Required for Claude Custom Connectors
 @app.post("/oauth/register")
 async def oauth_register(request: Request):
-    """Simplified OAuth client registration for Claude"""
+    """Dynamic Client Registration endpoint for Claude Custom Connectors"""
     try:
-        # For Claude, we can use a simplified registration
+        body = await request.json()
+
+        # Validate Claude's registration request
+        if body.get("client_name") != "claudeai":
+            raise HTTPException(status_code=400, detail="Unsupported client")
+
+        # Generate unique client credentials for Claude
+        import secrets
+        client_id = secrets.token_hex(16)
+
+        # Claude expects this exact response format
         return {
-            "client_id": "claude-mcp-client",
-            "client_secret": "mcp-secret-2024",
+            "client_id": client_id,
+            "client_name": "claudeai",
+            "grant_types": ["authorization_code", "refresh_token"],
+            "response_types": ["code"],
+            "token_endpoint_auth_method": "none",
+            "scope": "claudeai",
             "redirect_uris": [
-                "https://claude.ai/oauth/callback",
                 "https://claude.ai/api/mcp/auth_callback"
             ],
-            "grant_types": ["authorization_code"],
-            "response_types": ["code"]
+            "client_id_issued_at": int(datetime.now(timezone.utc).timestamp())
         }
 
     except Exception as e:
@@ -115,30 +127,69 @@ async def oauth_register(request: Request):
 @app.get("/oauth/authorize")
 async def oauth_authorize(
     response_type: str = "code",
-    client_id: str = "claude-mcp-client",
-    redirect_uri: str = None,
+    client_id: str = "test-client",
+    redirect_uri: str = "http://localhost:3000/callback",
     state: str = None,
-    scope: str = "read"
+    scope: str = None,
+    code_challenge: str = None,
+    code_challenge_method: str = None
 ):
-    """Simplified OAuth Authorization for Claude"""
-    # Claude usually handles this automatically, so we can return a simple auth code
-    # In production, you'd want proper user consent flow
-
+    """OAuth Authorization endpoint - renders user consent form"""
     try:
-        # For Claude integration, we can auto-approve with user's stored credentials
-        auth_code = "auto_generated_code_for_claude_" + str(int(datetime.now().timestamp()))
+        # In production, validate client_id exists from registration
+        # For demo, we'll accept any client_id that looks like a hex string
 
-        if redirect_uri:
-            callback_url = f"{redirect_uri}?code={auth_code}"
-            if state:
-                callback_url += f"&state={state}"
+        # PKCE is required for real OAuth but optional for testing
+        if code_challenge and code_challenge_method != "S256":
+            raise HTTPException(status_code=400, detail="PKCE method must be S256")
 
-            return {
-                "redirect_url": callback_url,
-                "code": auth_code
-            }
-        else:
-            return {"code": auth_code}
+        # For testing without PKCE, generate a dummy challenge
+        if not code_challenge:
+            code_challenge = "test_challenge"
+            code_challenge_method = "S256"
+
+        # Return HTML consent form
+        html_form = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Monarch Money MCP Authorization</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; max-width: 400px; margin: 50px auto; padding: 20px; }}
+                .form-group {{ margin: 15px 0; }}
+                label {{ display: block; margin-bottom: 5px; font-weight: bold; }}
+                input {{ width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }}
+                button {{ width: 100%; padding: 10px; background: #007cba; color: white; border: none; border-radius: 4px; font-size: 16px; }}
+                .info {{ background: #f0f8ff; padding: 10px; border-radius: 4px; margin-bottom: 20px; }}
+            </style>
+        </head>
+        <body>
+            <h2>Authorize Claude MCP Access</h2>
+            <div class="info">
+                <p><strong>Claude</strong> wants to access your Monarch Money data.</p>
+                <p>This will allow Claude to read your accounts, transactions, and budgets.</p>
+            </div>
+            <form method="POST" action="/oauth/authorize">
+                <input type="hidden" name="client_id" value="{client_id}">
+                <input type="hidden" name="code_challenge" value="{code_challenge}">
+                <input type="hidden" name="code_challenge_method" value="{code_challenge_method}">
+                <input type="hidden" name="redirect_uri" value="{redirect_uri}">
+                <input type="hidden" name="response_type" value="{response_type}">
+                <input type="hidden" name="scope" value="{scope or 'claudeai'}">
+                {f'<input type="hidden" name="state" value="{state}">' if state else ''}
+
+                <div class="form-group">
+                    <label>This is a demo - click Authorize to continue:</label>
+                </div>
+
+                <button type="submit" name="action" value="authorize">Authorize Access</button>
+            </form>
+        </body>
+        </html>
+        """
+
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse(content=html_form)
 
     except Exception as e:
         logger.error(f"Authorization error: {e}")
@@ -150,73 +201,185 @@ async def oauth_authorize_post(request: Request):
     try:
         form_data = await request.form()
 
+        action = form_data.get("action")
+        if action != "authorize":
+            raise HTTPException(status_code=400, detail="Authorization denied")
+
         client_id = form_data["client_id"]
-        email = form_data["email"]
-        password = form_data["password"]
-        redirect_uri = form_data.get("redirect_uri")
+        code_challenge = form_data["code_challenge"]
+        redirect_uri = form_data["redirect_uri"]
         state = form_data.get("state")
 
-        # Create authorization code
-        auth_code = await oauth_manager.authorize(client_id, email, password)
+        # Generate secure authorization code
+        import secrets
+        auth_code = secrets.token_hex(32)
 
-        # Redirect back to client
-        if redirect_uri:
-            callback_url = f"{redirect_uri}?code={auth_code}"
-            if state:
-                callback_url += f"&state={state}"
+        # Store authorization code with PKCE challenge for token exchange
+        # In production, store this securely with expiration
+        auth_storage[auth_code] = {
+            "client_id": client_id,
+            "code_challenge": code_challenge,
+            "redirect_uri": redirect_uri,
+            "expires_at": datetime.now(timezone.utc).timestamp() + 600,  # 10 minutes
+            "user_id": "demo_user"  # In real app, get from authentication
+        }
 
-            return JSONResponse(
-                content={"redirect_url": callback_url},
-                status_code=302,
-                headers={"Location": callback_url}
-            )
-        else:
-            return {"code": auth_code}
+        # Redirect back to Claude
+        callback_url = f"{redirect_uri}?code={auth_code}"
+        if state:
+            callback_url += f"&state={state}"
+
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url=callback_url, status_code=302)
 
     except Exception as e:
-        logger.error(f"Authorization error: {e}")
+        logger.error(f"Authorization processing error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/oauth/token")
 async def oauth_token(request: Request):
-    """Simplified OAuth Token Endpoint for Claude"""
+    """OAuth Token endpoint - handles both authorization_code and refresh_token grants"""
     try:
         form_data = await request.form()
-
         grant_type = form_data.get("grant_type")
-        code = form_data.get("code")
-        client_id = form_data.get("client_id", "claude-mcp-client")
-        client_secret = form_data.get("client_secret", "mcp-secret-2024")
 
-        # Validate the code format (should start with our prefix)
-        if not code or not code.startswith("auto_generated_code_for_claude_"):
-            raise HTTPException(status_code=400, detail="Invalid authorization code")
+        if grant_type == "authorization_code":
+            code = form_data.get("code")
+            client_id = form_data.get("client_id")
+            code_verifier = form_data.get("code_verifier")
+            redirect_uri = form_data.get("redirect_uri")
 
-        # Return a simple access token for Claude
-        access_token = f"mcp_access_token_{int(datetime.now().timestamp())}"
+            # Validate authorization code
+            if code not in auth_storage:
+                raise HTTPException(status_code=400, detail="Invalid authorization code")
 
-        return {
-            "access_token": access_token,
-            "token_type": "Bearer",
-            "expires_in": 3600,  # 1 hour
-            "scope": "read"
-        }
+            auth_data = auth_storage[code]
+
+            # Check expiration
+            if datetime.now(timezone.utc).timestamp() > auth_data["expires_at"]:
+                del auth_storage[code]
+                raise HTTPException(status_code=400, detail="Authorization code expired")
+
+            # Validate PKCE (skip validation for test challenge)
+            if auth_data["code_challenge"] != "test_challenge":
+                import hashlib
+                import base64
+                expected_challenge = base64.urlsafe_b64encode(
+                    hashlib.sha256(code_verifier.encode()).digest()
+                ).decode().rstrip('=')
+
+                if expected_challenge != auth_data["code_challenge"]:
+                    raise HTTPException(status_code=400, detail="Invalid code verifier")
+
+            # Validate client and redirect URI
+            if client_id != auth_data["client_id"] or redirect_uri != auth_data["redirect_uri"]:
+                raise HTTPException(status_code=400, detail="Client or redirect URI mismatch")
+
+            # Clean up used code
+            del auth_storage[code]
+
+            # Generate tokens
+            import secrets
+            access_token = f"mcp_access_{secrets.token_hex(32)}"
+            refresh_token = f"mcp_refresh_{secrets.token_hex(32)}"
+
+            # Store tokens for validation (in production, use secure storage)
+            token_storage[access_token] = {
+                "user_id": auth_data["user_id"],
+                "client_id": client_id,
+                "expires_at": datetime.now(timezone.utc).timestamp() + 3600,  # 1 hour
+                "scope": "claudeai"
+            }
+
+            refresh_storage[refresh_token] = {
+                "user_id": auth_data["user_id"],
+                "client_id": client_id,
+                "expires_at": datetime.now(timezone.utc).timestamp() + 2592000,  # 30 days
+            }
+
+            return {
+                "access_token": access_token,
+                "token_type": "Bearer",
+                "expires_in": 3600,
+                "refresh_token": refresh_token,
+                "scope": "claudeai"
+            }
+
+        elif grant_type == "refresh_token":
+            refresh_token = form_data.get("refresh_token")
+            client_id = form_data.get("client_id")
+
+            if refresh_token not in refresh_storage:
+                raise HTTPException(status_code=400, detail="Invalid refresh token")
+
+            refresh_data = refresh_storage[refresh_token]
+
+            if datetime.now(timezone.utc).timestamp() > refresh_data["expires_at"]:
+                del refresh_storage[refresh_token]
+                raise HTTPException(status_code=400, detail="Refresh token expired")
+
+            if client_id != refresh_data["client_id"]:
+                raise HTTPException(status_code=400, detail="Client ID mismatch")
+
+            # Generate new access token
+            import secrets
+            access_token = f"mcp_access_{secrets.token_hex(32)}"
+
+            token_storage[access_token] = {
+                "user_id": refresh_data["user_id"],
+                "client_id": client_id,
+                "expires_at": datetime.now(timezone.utc).timestamp() + 3600,
+                "scope": "claudeai"
+            }
+
+            return {
+                "access_token": access_token,
+                "token_type": "Bearer",
+                "expires_in": 3600,
+                "scope": "claudeai"
+            }
+
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported grant type")
 
     except Exception as e:
         logger.error(f"Token exchange error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
+# In-memory storage for demo (use secure storage in production)
+auth_storage = {}  # authorization codes
+token_storage = {}  # access tokens
+refresh_storage = {}  # refresh tokens
+
 # MCP Protocol Endpoints
 async def get_bearer_token(authorization: str = Header(None)) -> str:
     """Extract and validate bearer token for Claude"""
     if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
+        # Return proper WWW-Authenticate header as per OAuth spec
+        raise HTTPException(
+            status_code=401,
+            detail="Unauthorized",
+            headers={"WWW-Authenticate": 'Bearer realm="mcp", authorization_uri="/.well-known/oauth-protected-resource"'}
+        )
 
     token = authorization.split(" ", 1)[1]
 
-    # Simple validation for Claude tokens
-    if not token.startswith("mcp_access_token_"):
-        raise HTTPException(status_code=401, detail="Invalid token format")
+    # Validate token exists and hasn't expired
+    if token not in token_storage:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid access token",
+            headers={"WWW-Authenticate": 'Bearer realm="mcp", authorization_uri="/.well-known/oauth-protected-resource"'}
+        )
+
+    token_data = token_storage[token]
+    if datetime.now(timezone.utc).timestamp() > token_data["expires_at"]:
+        del token_storage[token]
+        raise HTTPException(
+            status_code=401,
+            detail="Access token expired",
+            headers={"WWW-Authenticate": 'Bearer realm="mcp", authorization_uri="/.well-known/oauth-protected-resource"'}
+        )
 
     return token
 
