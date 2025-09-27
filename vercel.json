@@ -1,80 +1,29 @@
 {
   "functions": {
-    "api/oauth.py": {
-      "maxDuration": 30
-    },
-    "api/mcp.py": {
+    "api/index.py": {
       "maxDuration": 30
     }
   },
   "rewrites": [
     {
-      "source": "/",
-      "destination": "/api/mcp-discovery"
-    },
-    {
-      "source": "/.well-known/mcp",
-      "destination": "/api/mcp-discovery"
-    },
-    {
-      "source": "/.well-known/oauth-authorization-server",
-      "destination": "/api/oauth"
-    },
-    {
-      "source": "/.well-known/openid-configuration",
-      "destination": "/api/oauth"
-    },
-    {
-      "source": "/.well-known/oauth-protected-resource",
-      "destination": "/api/oauth"
-    },
-    {
-      "source": "/register",
-      "destination": "/api/oauth?action=register"
-    },
-    {
-      "source": "/mcp/register",
-      "destination": "/api/oauth?action=register"
-    },
-    {
-      "source": "/mcp/oauth/register",
-      "destination": "/api/oauth?action=register"
-    },
-    {
       "source": "/oauth/register",
-      "destination": "/api/oauth?action=register"
-    },
-    {
-      "source": "/mcp",
-      "destination": "/api/mcp"
-    },
-    {
-      "source": "/health",
-      "destination": "/api/mcp-discovery"
-    },
-    {
-      "source": "/oauth(.*)",
-      "destination": "/api/oauth"
-    },
-    {
-      "source": "/tools/call",
-      "destination": "/api/fastmcp"
-    },
-    {
-      "source": "/api/auth/(.*)",
-      "destination": "/api/auth"
-    },
-    {
-      "source": "/api/(accounts|transactions|budgets|spending-plan)",
       "destination": "/api/index"
     },
     {
-      "source": "/debug(.*)",
-      "destination": "/api/debug"
+      "source": "/register",
+      "destination": "/api/index"
     },
     {
-      "source": "/api$",
-      "destination": "/api/mcp"
+      "source": "/mcp/register",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/mcp/oauth/register",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/api/index"
     }
   ],
   "headers": [
