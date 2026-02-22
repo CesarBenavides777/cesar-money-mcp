@@ -31,7 +31,9 @@ async function verifyCodeChallenge(
 // ── RFC 8414: OAuth Authorization Server Metadata ───────────────────────────
 
 oauthRouter.get("/.well-known/oauth-authorization-server", (c) => {
-  const issuer = new URL(c.req.url).origin;
+  const url = new URL(c.req.url);
+  const proto = c.req.header("x-forwarded-proto") || url.protocol.replace(":", "");
+  const issuer = `${proto}://${url.host}`;
 
   return c.json({
     issuer,

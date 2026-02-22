@@ -44,7 +44,9 @@ async function startHttp() {
   const { Hono } = await import("hono");
   const { cors } = await import("hono/cors");
   const { logger } = await import("hono/logger");
-  const { HttpTransport } = await import("./mcp/transport.js");
+  const { WebStandardStreamableHTTPServerTransport } = await import(
+    "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js"
+  );
   const { oauthRouter } = await import("./oauth/routes.js");
   const { initTokenStore, cleanupExpired } = await import(
     "./oauth/store.js"
@@ -63,8 +65,13 @@ async function startHttp() {
   app.use(
     cors({
       origin: config.server.corsOrigins,
-      allowMethods: ["GET", "POST", "OPTIONS"],
-      allowHeaders: ["Content-Type", "Authorization", "Mcp-Session-Id"],
+      allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
+      allowHeaders: [
+        "Content-Type",
+        "Authorization",
+        "Mcp-Session-Id",
+        "Mcp-Protocol-Version",
+      ],
       exposeHeaders: [
         "Mcp-Session-Id",
         "X-RateLimit-Limit",
@@ -85,57 +92,40 @@ async function startHttp() {
   // ── OAuth routes ──
   app.route("/", oauthRouter);
 
-  // ── MCP endpoint (Streamable HTTP) ──
-  interface McpSession {
-    server: ReturnType<typeof createMcpServer>;
-    transport: InstanceType<typeof HttpTransport>;
-    lastAccess: number;
-  }
-  const sessions = new Map<string, McpSession>();
+  // ── MCP endpoint (Streamable HTTP — standard MCP transport) ──
+  type TransportInstance = InstanceType<typeof WebStandardStreamableHTTPServerTransport>;
+  const sessions = new Map<string, TransportInstance>();
 
   // Clean up stale sessions + expired tokens every 5 minutes
   setInterval(() => {
-    const cutoff = Date.now() - 30 * 60_000;
-    for (const [id, session] of sessions) {
-      if (session.lastAccess < cutoff) {
-        session.transport.close();
-        sessions.delete(id);
-      }
-    }
     cleanupExpired();
   }, 5 * 60_000);
 
-  app.post("/mcp", rateLimit({ rpm: config.rateLimit.rpm }), async (c) => {
-    const body = await c.req.json();
+  // Handle all MCP methods (POST, GET for SSE, DELETE for session termination)
+  app.all("/mcp", rateLimit({ rpm: config.rateLimit.rpm }), async (c) => {
     const sessionId = c.req.header("mcp-session-id");
 
-    let transport: InstanceType<typeof HttpTransport>;
-    let newSessionId: string | undefined;
-
+    // Existing session — route to its transport
     if (sessionId && sessions.has(sessionId)) {
-      const session = sessions.get(sessionId)!;
-      transport = session.transport;
-      session.lastAccess = Date.now();
-    } else {
-      newSessionId = crypto.randomUUID();
-      const mcpServer = createMcpServer();
-      transport = new HttpTransport();
-      await mcpServer.connect(transport);
-      sessions.set(newSessionId, {
-        server: mcpServer,
-        transport,
-        lastAccess: Date.now(),
-      });
+      const transport = sessions.get(sessionId)!;
+      return transport.handleRequest(c.req.raw);
     }
 
-    const response = await transport.handleJsonRpc(body);
+    // New session — create transport + MCP server
+    const transport = new WebStandardStreamableHTTPServerTransport({
+      sessionIdGenerator: () => crypto.randomUUID(),
+      onsessioninitialized: (id) => {
+        sessions.set(id, transport);
+      },
+      onsessionclosed: (id) => {
+        sessions.delete(id);
+      },
+    });
 
-    const headers: Record<string, string> = {};
-    if (newSessionId) {
-      headers["mcp-session-id"] = newSessionId;
-    }
+    const mcpServer = createMcpServer();
+    await mcpServer.connect(transport);
 
-    return c.json(response, { headers });
+    return transport.handleRequest(c.req.raw);
   });
 
   // ── API routes (REST, for non-MCP consumers) ──
@@ -148,7 +138,7 @@ async function startHttp() {
   console.log(
     `Monarch Money MCP server listening on http://localhost:${port}`
   );
-  console.log(`  MCP endpoint: POST /mcp`);
+  console.log(`  MCP endpoint: POST|GET|DELETE /mcp`);
   console.log(`  Health check: GET /health`);
   console.log(`  OAuth:        GET /.well-known/oauth-authorization-server`);
 
