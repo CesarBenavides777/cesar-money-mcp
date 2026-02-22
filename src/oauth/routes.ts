@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { timingSafeEqual } from "crypto";
 import {
   generateAuthCode,
   consumeAuthCode,
@@ -8,7 +9,18 @@ import {
   validateClient,
   getClientRedirectUris,
 } from "./store.js";
-import { validateMonarchCredentials } from "./provider.js";
+
+/** Constant-time string comparison to prevent timing attacks */
+function safeCompare(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) {
+    // Compare against self to keep constant time, then return false
+    timingSafeEqual(bufA, bufA);
+    return false;
+  }
+  return timingSafeEqual(bufA, bufB);
+}
 
 export const oauthRouter = new Hono();
 
@@ -171,7 +183,7 @@ oauthRouter.get("/oauth/authorize", (c) => {
   return c.html(html);
 });
 
-// ── POST /oauth/authorize — Process auth, redirect with code ────────────────
+// ── POST /oauth/authorize — Validate passphrase, redirect with code ─────────
 
 oauthRouter.post("/oauth/authorize", async (c) => {
   let body: Record<string, string>;
@@ -186,9 +198,7 @@ oauthRouter.post("/oauth/authorize", async (c) => {
   }
 
   const {
-    email,
-    password,
-    mfa_secret: mfaSecret,
+    passphrase,
     client_id: clientId,
     redirect_uri: redirectUri,
     state,
@@ -196,7 +206,7 @@ oauthRouter.post("/oauth/authorize", async (c) => {
     code_challenge_method: codeChallengeMethod,
   } = body;
 
-  if (!email || !password) {
+  if (!passphrase) {
     return c.html(
       renderAuthForm({
         clientId: clientId || "",
@@ -204,7 +214,7 @@ oauthRouter.post("/oauth/authorize", async (c) => {
         state: state || "",
         codeChallenge: codeChallenge || "",
         codeChallengeMethod: codeChallengeMethod || "",
-        errorMessage: "Email and password are required.",
+        errorMessage: "Passphrase is required.",
       }),
       400
     );
@@ -239,14 +249,9 @@ oauthRouter.post("/oauth/authorize", async (c) => {
     );
   }
 
-  // Authenticate against Monarch Money
-  const result = await validateMonarchCredentials(
-    email,
-    password,
-    mfaSecret || undefined
-  );
-
-  if (!result.valid) {
+  // Validate passphrase against server secret
+  const expectedPassphrase = process.env.OAUTH_PASSPHRASE;
+  if (!expectedPassphrase) {
     return c.html(
       renderAuthForm({
         clientId,
@@ -254,7 +259,21 @@ oauthRouter.post("/oauth/authorize", async (c) => {
         state: state || "",
         codeChallenge: codeChallenge || "",
         codeChallengeMethod: codeChallengeMethod || "",
-        errorMessage: result.error || "Authentication failed.",
+        errorMessage: "Server misconfigured: OAUTH_PASSPHRASE not set.",
+      }),
+      500
+    );
+  }
+
+  if (!safeCompare(passphrase, expectedPassphrase)) {
+    return c.html(
+      renderAuthForm({
+        clientId,
+        redirectUri,
+        state: state || "",
+        codeChallenge: codeChallenge || "",
+        codeChallengeMethod: codeChallengeMethod || "",
+        errorMessage: "Invalid passphrase.",
       }),
       401
     );
@@ -454,8 +473,8 @@ function renderAuthForm(params: {
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: #f5f5f5;
-      color: #333;
+      background: #0f0f13;
+      color: #e4e4e7;
       display: flex;
       justify-content: center;
       align-items: center;
@@ -463,68 +482,66 @@ function renderAuthForm(params: {
       padding: 1rem;
     }
     .card {
-      background: #fff;
-      border-radius: 12px;
-      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
-      padding: 2rem;
+      background: #1a1a23;
+      border: 1px solid #2a2a35;
+      border-radius: 16px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.3);
+      padding: 2.5rem 2rem;
       width: 100%;
       max-width: 420px;
     }
     .logo {
       text-align: center;
-      margin-bottom: 1.5rem;
+      margin-bottom: 2rem;
     }
     .logo h1 {
-      font-size: 1.25rem;
+      font-size: 1.35rem;
       font-weight: 600;
-      color: #1a1a2e;
+      color: #f4f4f5;
+      letter-spacing: -0.01em;
     }
     .logo p {
       font-size: 0.85rem;
-      color: #666;
-      margin-top: 0.25rem;
+      color: #71717a;
+      margin-top: 0.5rem;
     }
     .error {
-      background: #fef2f2;
-      border: 1px solid #fecaca;
-      color: #dc2626;
+      background: rgba(220, 38, 38, 0.1);
+      border: 1px solid rgba(220, 38, 38, 0.3);
+      color: #fca5a5;
       padding: 0.75rem 1rem;
       border-radius: 8px;
       font-size: 0.875rem;
-      margin-bottom: 1rem;
+      margin-bottom: 1.25rem;
     }
     label {
       display: block;
       font-size: 0.875rem;
       font-weight: 500;
-      margin-bottom: 0.35rem;
-      color: #444;
+      margin-bottom: 0.4rem;
+      color: #a1a1aa;
     }
-    input[type="email"],
-    input[type="password"],
-    input[type="text"] {
+    input[type="password"] {
       width: 100%;
-      padding: 0.625rem 0.75rem;
-      border: 1px solid #d1d5db;
+      padding: 0.7rem 0.85rem;
+      background: #0f0f13;
+      border: 1px solid #2a2a35;
       border-radius: 8px;
       font-size: 0.9375rem;
-      margin-bottom: 1rem;
+      color: #e4e4e7;
+      margin-bottom: 1.25rem;
       transition: border-color 0.15s;
     }
     input:focus {
       outline: none;
       border-color: #6366f1;
-      box-shadow: 0 0 0 3px rgba(99,102,241,0.1);
+      box-shadow: 0 0 0 3px rgba(99,102,241,0.15);
     }
-    .optional {
-      font-weight: 400;
-      color: #999;
-      font-size: 0.75rem;
-    }
+    input::placeholder { color: #52525b; }
     button {
       width: 100%;
       padding: 0.75rem;
-      background: #4f46e5;
+      background: #6366f1;
       color: #fff;
       border: none;
       border-radius: 8px;
@@ -533,22 +550,27 @@ function renderAuthForm(params: {
       cursor: pointer;
       transition: background 0.15s;
     }
-    button:hover { background: #4338ca; }
-    button:active { background: #3730a3; }
-    .info {
-      margin-top: 1rem;
-      font-size: 0.75rem;
-      color: #888;
+    button:hover { background: #4f46e5; }
+    button:active { background: #4338ca; }
+    .help {
+      margin-top: 1.5rem;
       text-align: center;
-      line-height: 1.4;
+      font-size: 0.8rem;
+      color: #52525b;
+      line-height: 1.5;
     }
+    .help a {
+      color: #818cf8;
+      text-decoration: none;
+    }
+    .help a:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
   <div class="card">
     <div class="logo">
       <h1>Monarch Money MCP</h1>
-      <p>Sign in with your Monarch Money account</p>
+      <p>Enter your server passphrase to authorize access</p>
     </div>
     ${errorHtml}
     <form method="POST" action="/oauth/authorize">
@@ -558,20 +580,13 @@ function renderAuthForm(params: {
       <input type="hidden" name="code_challenge" value="${escapeAttr(params.codeChallenge)}" />
       <input type="hidden" name="code_challenge_method" value="${escapeAttr(params.codeChallengeMethod)}" />
 
-      <label for="email">Email</label>
-      <input type="email" id="email" name="email" required autocomplete="email" placeholder="you@example.com" />
-
-      <label for="password">Password</label>
-      <input type="password" id="password" name="password" required autocomplete="current-password" />
-
-      <label for="mfa_secret">MFA Secret <span class="optional">(optional)</span></label>
-      <input type="text" id="mfa_secret" name="mfa_secret" autocomplete="one-time-code" placeholder="Base32 TOTP secret" />
+      <label for="passphrase">Passphrase</label>
+      <input type="password" id="passphrase" name="passphrase" required autocomplete="off" placeholder="Enter server passphrase" />
 
       <button type="submit">Authorize</button>
     </form>
-    <p class="info">
-      Your credentials are used only to authenticate with Monarch Money.<br/>
-      They are never stored by this server.
+    <p class="help">
+      Need help configuring? <a href="https://www.cesarbenavides.com/" target="_blank" rel="noopener">Contact me here</a>
     </p>
   </div>
 </body>
