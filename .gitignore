@@ -25,6 +25,9 @@ node_modules/
 *.db-wal
 *.db-shm
 
+# Claude Code (local settings have permissions, never commit)
+.claude/settings.local.json
+
 # IDE / editor
 .specstory/
 .mm/
