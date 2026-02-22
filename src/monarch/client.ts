@@ -43,6 +43,7 @@ async function createClient(): Promise<MonarchClient> {
   }
 
   const client = new MonarchClient({
+    baseURL: process.env.MONARCH_BASE_URL || "https://api.monarch.com",
     timeout: 30_000,
     retries: 3,
     retryDelay: 1000,
