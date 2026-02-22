@@ -11,8 +11,8 @@ COPY src/ src/
 COPY tsconfig.json ./
 
 # Create a non-root user for security
-RUN addgroup --system --gid 1001 mcp && \
-    adduser --system --uid 1001 --ingroup mcp mcp && \
+RUN groupadd --system --gid 1001 mcp && \
+    useradd --system --uid 1001 --gid mcp --no-create-home mcp && \
     mkdir -p /data && \
     chown mcp:mcp /data
 
