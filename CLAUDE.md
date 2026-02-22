@@ -17,6 +17,30 @@ Supports two transports:
 - **Auth**: OAuth 2.1 with PKCE, SQLite token storage via `bun:sqlite`
 - **Validation**: Zod
 - **TypeScript**: ^5.7, target ES2022, module ESNext, bundler resolution
+- **CI/CD**: GitHub Actions → Fly.io
+
+## Quick Navigation
+
+| What you're looking for | Where to go |
+|---|---|
+| Entry point | `src/index.ts` |
+| Environment config | `src/config.ts` |
+| Monarch Money API client | `src/monarch/client.ts` |
+| MCP server + tool registration | `src/mcp/server.ts` |
+| HTTP transport bridge | `src/mcp/transport.ts` |
+| Data tools | `src/tools/accounts.ts`, `transactions.ts`, `budgets.ts`, `cashflow.ts`, `recurring.ts`, `categories.ts`, `institutions.ts`, `insights.ts` |
+| Analysis tools | `src/tools/analysis.ts` (wires analysis functions as MCP tools) |
+| Analysis engine (pure functions) | `src/analysis/spending.ts`, `anomalies.ts`, `forecasting.ts`, `subscriptions.ts`, `trends.ts`, `health.ts` |
+| MCP resources | `src/tools/resources.ts` |
+| MCP prompts | `src/tools/prompts.ts` |
+| OAuth 2.1 flow | `src/oauth/routes.ts`, `store.ts`, `provider.ts` |
+| Middleware | `src/middleware/auth.ts`, `rate-limit.ts`, `audit.ts` |
+| Tests | `src/**/*.test.ts` (colocated with source) |
+| CI pipeline | `.github/workflows/ci.yml` |
+| Deploy pipeline | `.github/workflows/deploy.yml` |
+| Fly.io config | `fly.toml`, `Dockerfile` |
+| monarchmoney SDK types | `node_modules/monarchmoney/dist/types/` |
+| MCP SDK types | `node_modules/@modelcontextprotocol/sdk/dist/esm/server/mcp.d.ts` |
 
 ## Project Structure
 
@@ -114,6 +138,7 @@ export function registerMyFeatureTools(server: McpServer) {
    - Fetching required data via `getMonarchClient()`
    - Passing the data to the pure function
    - Returning the result as JSON text content
+4. Add a test in `src/analysis/my-analysis.test.ts`
 
 Analysis functions should be pure (data in, result out) so they are easy to unit test without mocking the Monarch API.
 
@@ -126,14 +151,81 @@ Analysis functions should be pure (data in, result out) so they are easy to unit
 - API sub-domains: `client.accounts`, `client.transactions`, `client.budgets`, `client.categories`, `client.institutions`, `client.insights`, `client.recurring`
 - Use `resetMonarchClient()` to force a fresh login (e.g., after credential changes)
 
+### Monarch API Quick Reference
+
+```typescript
+const client = await getMonarchClient();
+
+// Accounts
+client.accounts.getAll({ includeHidden? })        // → Account[]
+client.accounts.getHistory(id, start?, end?)       // → AccountBalance[]
+client.accounts.getNetWorthHistory(start?, end?)   // → {date, netWorth}[]
+client.accounts.getById(id)                        // → Account
+client.accounts.getBalances(start?, end?)           // → AccountBalance[]
+client.accounts.createManualAccount(input)          // → Account
+client.accounts.updateAccount(id, updates)          // → Account
+client.accounts.requestRefresh(ids?)                // → boolean (trigger sync)
+
+// Transactions
+client.transactions.getTransactions(opts)           // → PaginatedTransactions (.transactions for array!)
+client.transactions.getTransactionDetails(id)       // → TransactionDetails
+client.transactions.createTransaction(data)         // → Transaction
+client.transactions.updateTransaction(id, data)     // → Transaction
+client.transactions.deleteTransaction(id)           // → boolean
+client.transactions.getMerchants(opts?)              // → Merchant[]
+client.transactions.bulkUpdateTransactions(data)    // → BulkUpdateResult
+
+// Transaction Rules
+client.transactions.getTransactionRules()           // → TransactionRule[]
+client.transactions.createTransactionRule(data)     // → TransactionRule
+
+// Budgets & Cash Flow
+client.budgets.getBudgets(opts?)                    // → BudgetData (.budgetData.monthlyAmountsByCategory)
+client.budgets.setCashFlow(opts?)                   // → CashFlowData
+client.budgets.getCashFlowSummary(opts?)            // → CashFlowSummary
+client.budgets.getGoals()                           // → Goal[]
+client.budgets.createGoal(params)                   // → CreateGoalResponse
+client.budgets.getBills(opts?)                      // → BillsData
+
+// Categories & Tags
+client.categories.getCategories()                   // → TransactionCategory[]
+client.categories.getCategoryGroups()               // → CategoryGroup[]
+client.categories.getTags()                         // → TransactionTag[]
+client.categories.createTag(data)                   // → TransactionTag
+client.categories.setTransactionTags(txId, tagIds)  // → boolean
+
+// Recurring
+client.recurring.getRecurringStreams(opts?)          // → {stream: RecurringTransactionStream}[]
+client.recurring.getUpcomingRecurringItems(opts)     // → RecurringTransactionItem[]
+
+// Institutions
+client.institutions.getInstitutions()               // → Institution[]
+
+// Insights
+client.insights.getNetWorthHistory(opts?)            // → NetWorthHistoryPoint[]
+client.insights.getCreditScore(opts?)                // → CreditScore
+client.insights.getSubscriptionDetails()             // → SubscriptionDetails
+client.insights.getNotifications()                   // → Notification[]
+```
+
+### Common Type Gotchas
+
+- `getTransactions()` returns `PaginatedTransactions` — access `.transactions` for the `Transaction[]`
+- Transaction `.category` can be `null` — always use `tx.category?.name ?? "Uncategorized"`
+- Account `.type` is an object `{id, name, display}` not a string — use `a.type.name`
+- Use `categoryIds: string[]` (plural array), NOT `categoryId`
+- `getBudgets()` returns nested `BudgetData` — budget items are at `.budgetData.monthlyAmountsByCategory`
+- Recurring streams: each item is `{stream: RecurringTransactionStream}` — access via `r.stream.*`
+
 ### Adding an MCP Resource
 
 Register in `src/tools/resources.ts`:
 
 ```typescript
-server.resource(
-  "resource-name",      // Human-readable name
-  "finance://my-uri",   // URI
+server.registerResource(
+  "resource-name",
+  "finance://my-uri",
+  { description: "What this resource provides" },
   async (uri) => {
     const client = await getMonarchClient();
     const data = await client.someApi.someMethod();
@@ -153,16 +245,15 @@ server.resource(
 Register in `src/tools/prompts.ts`:
 
 ```typescript
-server.prompt(
+server.registerPrompt(
   "prompt-name",
-  "Description of the analysis this prompt performs",
-  {},
+  { description: "What analysis this prompt performs" },
   async () => ({
     messages: [{
       role: "user" as const,
       content: {
         type: "text" as const,
-        text: "Detailed instructions for the AI, including which tools to call and how to format the report...",
+        text: "Detailed instructions for the AI...",
       },
     }],
   })
@@ -178,9 +269,7 @@ server.prompt(
 | `bun start:stdio` | Start in stdio transport mode |
 | `bun start:http` | Start HTTP server on port 3200 |
 | `bun check-types` | TypeScript type checking (`tsc --noEmit`) |
-| `bun test` | Run test suite |
-| `bun lint` | Lint source with Biome |
-| `bun format` | Auto-format source with Biome |
+| `bun test` | Run test suite (68 tests, 7 files) |
 
 ## Environment Variables
 
@@ -200,10 +289,11 @@ server.prompt(
 
 ## Testing
 
-- `bun test` runs the test suite
+- `bun test` runs the full suite (68 tests across 7 files)
 - Test files live alongside source as `*.test.ts` files (e.g., `src/analysis/spending.test.ts`)
 - Analysis functions in `src/analysis/` are pure and can be tested by passing mock data directly — no API mocking needed
-- For integration tests that hit the real Monarch API, set `HAS_REAL_CREDENTIALS=true` and provide `MONARCH_EMAIL` / `MONARCH_PASSWORD` / `MONARCH_MFA_SECRET`
+- OAuth store tests use a temporary SQLite DB
+- For integration tests that hit the real Monarch API, set `HAS_REAL_CREDENTIALS=true`
 
 ## HTTP Endpoints (HTTP mode only)
 
@@ -225,3 +315,5 @@ server.prompt(
 - All tool handlers return `{ content: [{ type: "text", text: ... }] }`. On error they set `isError: true`.
 - The HTTP transport (`src/mcp/transport.ts`) bridges individual HTTP POST requests to the MCP server's async transport interface using a promise-per-request pattern with a 60-second timeout.
 - Sessions in HTTP mode are tracked by `Mcp-Session-Id` header and auto-expire after 30 minutes of inactivity.
+- Use the non-deprecated APIs: `server.registerTool()`, `server.registerResource()`, `server.registerPrompt()`, `db.run()`.
+- CI runs on every push/PR. Deploys to Fly.io on push to `master`.
