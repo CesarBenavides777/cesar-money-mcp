@@ -3,22 +3,26 @@ import { z } from "zod";
 import { getMonarchClient } from "../monarch/client.js";
 
 export function registerCashflowTools(server: McpServer) {
-  server.tool(
+  server.registerTool(
     "get_cashflow",
-    "Get detailed cash flow data showing income and expense breakdowns over a time period. Returns granular category-level spending and income data useful for understanding where money is coming from and going to. Use this for detailed cash flow analysis or when the user wants to drill into specific income/expense categories.",
     {
-      startDate: z
-        .string()
-        .optional()
-        .describe(
-          "Start date for the cash flow period in YYYY-MM-DD format. Defaults to the current month start."
-        ),
-      endDate: z
-        .string()
-        .optional()
-        .describe(
-          "End date for the cash flow period in YYYY-MM-DD format. Defaults to the current month end."
-        ),
+      description:
+        "Get detailed cash flow data showing income and expense breakdowns over a time period. Returns granular category-level spending and income data useful for understanding where money is coming from and going to. Use this for detailed cash flow analysis or when the user wants to drill into specific income/expense categories.",
+      inputSchema: {
+        startDate: z
+          .string()
+          .optional()
+          .describe(
+            "Start date for the cash flow period in YYYY-MM-DD format. Defaults to the current month start."
+          ),
+        endDate: z
+          .string()
+          .optional()
+          .describe(
+            "End date for the cash flow period in YYYY-MM-DD format. Defaults to the current month end."
+          ),
+      },
+      annotations: { readOnlyHint: true },
     },
     async ({ startDate, endDate }) => {
       try {
@@ -43,22 +47,26 @@ export function registerCashflowTools(server: McpServer) {
     }
   );
 
-  server.tool(
+  server.registerTool(
     "get_cashflow_summary",
-    "Get a high-level cash flow summary showing total income versus total expenses for a time period. Returns aggregated totals and the net savings/deficit. Use this for a quick overview of whether the user is saving or overspending, or for simple income-vs-expense comparisons.",
     {
-      startDate: z
-        .string()
-        .optional()
-        .describe(
-          "Start date for the summary period in YYYY-MM-DD format. Defaults to the current month start."
-        ),
-      endDate: z
-        .string()
-        .optional()
-        .describe(
-          "End date for the summary period in YYYY-MM-DD format. Defaults to the current month end."
-        ),
+      description:
+        "Get a high-level cash flow summary showing total income versus total expenses for a time period. Returns aggregated totals and the net savings/deficit. Use this for a quick overview of whether the user is saving or overspending, or for simple income-vs-expense comparisons.",
+      inputSchema: {
+        startDate: z
+          .string()
+          .optional()
+          .describe(
+            "Start date for the summary period in YYYY-MM-DD format. Defaults to the current month start."
+          ),
+        endDate: z
+          .string()
+          .optional()
+          .describe(
+            "End date for the summary period in YYYY-MM-DD format. Defaults to the current month end."
+          ),
+      },
+      annotations: { readOnlyHint: true },
     },
     async ({ startDate, endDate }) => {
       try {

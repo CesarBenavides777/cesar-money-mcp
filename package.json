@@ -1,6 +1,6 @@
 {
   "name": "monarch-money-mcp",
-  "version": "1.0.0",
+  "version": "0.1.0-alpha.1",
   "description": "Open-source MCP server for Monarch Money — personal finance data, analysis, and AI-powered insights",
   "type": "module",
   "main": "src/index.ts",
@@ -30,7 +30,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/cesarmac/monarch-money-mcp"
+    "url": "https://github.com/CesarBenavides777/cesar-money-mcp"
   },
   "keywords": [
     "mcp",

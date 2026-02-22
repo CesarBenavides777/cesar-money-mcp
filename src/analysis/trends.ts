@@ -52,7 +52,7 @@ export function detectTrends(
   }
   if (options.categories && options.categories.length > 0) {
     const catSet = new Set(options.categories);
-    filtered = filtered.filter((tx) => catSet.has(tx.category.name));
+    filtered = filtered.filter((tx) => catSet.has(tx.category?.name ?? "Uncategorized"));
   }
 
   if (filtered.length === 0) return [];
@@ -61,7 +61,7 @@ export function detectTrends(
   const categoryMonths = new Map<string, Map<string, number>>();
 
   for (const tx of filtered) {
-    const cat = tx.category.name || "Uncategorized";
+    const cat = tx.category?.name || "Uncategorized";
     const month = tx.date.slice(0, 7); // "YYYY-MM"
 
     let monthMap = categoryMonths.get(cat);

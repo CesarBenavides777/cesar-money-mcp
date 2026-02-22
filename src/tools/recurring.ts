@@ -2,10 +2,13 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { getMonarchClient } from "../monarch/client.js";
 
 export function registerRecurringTools(server: McpServer) {
-  server.tool(
+  server.registerTool(
     "get_recurring_transactions",
-    "Get all recurring transactions including subscriptions, bills, and regular payments. Returns details about each recurring stream such as merchant, amount, frequency, and next expected date. Use this to help the user understand their fixed obligations, find subscriptions they may want to cancel, or estimate upcoming bills.",
-    {},
+    {
+      description:
+        "Get all recurring transactions including subscriptions, bills, and regular payments. Returns details about each recurring stream such as merchant, amount, frequency, and next expected date. Use this to help the user understand their fixed obligations, find subscriptions they may want to cancel, or estimate upcoming bills.",
+      annotations: { readOnlyHint: true },
+    },
     async () => {
       try {
         const client = await getMonarchClient();

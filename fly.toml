@@ -8,6 +8,7 @@ primary_region = "sjc"
   TRANSPORT = "http"
   PORT = "3200"
   NODE_ENV = "production"
+  DB_PATH = "/data/monarch-mcp.db"
 
 [http_service]
   internal_port = 3200

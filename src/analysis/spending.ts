@@ -25,8 +25,9 @@ export interface Transaction {
   id: string;
   date: string; // "YYYY-MM-DD"
   amount: number; // negative = expense, positive = income
+  /** Display name — Monarch API may use `merchant`, `merchantName`, or nested `merchant.name` */
   merchant: string;
-  category: { name: string };
+  category?: { name: string } | null;
 }
 
 export interface SpendingOptions {
@@ -80,7 +81,7 @@ export function analyzeSpending(
 
     // Category aggregation — only expenses contribute
     if (tx.amount < 0) {
-      const cat = tx.category.name || "Uncategorized";
+      const cat = tx.category?.name || "Uncategorized";
       const existing = categoryMap.get(cat);
       if (existing) {
         existing.amount += Math.abs(tx.amount);

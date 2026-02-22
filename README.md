@@ -30,8 +30,8 @@ A TypeScript [Model Context Protocol](https://modelcontextprotocol.io/) server t
 ### Installation
 
 ```bash
-git clone https://github.com/cesarmac/monarch-money-mcp.git
-cd monarch-money-mcp
+git clone https://github.com/CesarBenavides777/cesar-money-mcp.git
+cd cesar-money-mcp
 cp .env.example .env   # Edit with your Monarch Money credentials
 bun install
 ```
@@ -72,7 +72,7 @@ Verify it is running:
 
 ```bash
 curl http://localhost:3200/health
-# {"status":"ok","server":"monarch-money-mcp","version":"1.0.0"}
+# {"status":"ok","server":"monarch-money-mcp","version":"0.1.0-alpha.1"}
 ```
 
 Send MCP requests to `POST /mcp`. The server will return a `Mcp-Session-Id` header for session continuity.
@@ -168,6 +168,8 @@ fly deploy
 
 The Fly config uses a shared-cpu-1x VM with 256 MB memory, auto-stop/start, and a persistent volume mounted at `/data` for the SQLite token store.
 
+**Live deployment:** https://monarch-money-mcp.fly.dev/
+
 ---
 
 ## Configuration
@@ -202,6 +204,7 @@ monarch-money-mcp/
 │   │   ├── server.ts          # MCP server factory (registers all tools/resources/prompts)
 │   │   └── transport.ts       # HTTP transport bridge for Hono
 │   ├── tools/
+│   │   ├── index.ts           # Barrel re-exports for tool registration
 │   │   ├── accounts.ts        # get_accounts, get_account_history
 │   │   ├── transactions.ts    # get_transactions, search_transactions
 │   │   ├── budgets.ts         # get_budgets

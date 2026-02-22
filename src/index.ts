@@ -18,7 +18,7 @@ const config = loadConfig();
 if (config.server.transport === "stdio") {
   await startStdio();
 } else {
-  startHttp();
+  await startHttp();
 }
 
 // ── stdio mode ──────────────────────────────────────────────────────────────
@@ -40,19 +40,20 @@ async function startStdio() {
 
 // ── HTTP mode ───────────────────────────────────────────────────────────────
 
-function startHttp() {
-  const { Hono } = require("hono") as typeof import("hono");
-  const { cors } = require("hono/cors") as typeof import("hono/cors");
-  const { logger } = require("hono/logger") as typeof import("hono/logger");
-  const { HttpTransport } = require("./mcp/transport.js") as typeof import("./mcp/transport.js");
-  const { oauthRouter } = require("./oauth/routes.js") as typeof import("./oauth/routes.js");
-  const { initTokenStore } = require("./oauth/store.js") as typeof import("./oauth/store.js");
-  const { rateLimit } = require("./middleware/rate-limit.js") as typeof import("./middleware/rate-limit.js");
-  const { auditLog } = require("./middleware/audit.js") as typeof import("./middleware/audit.js");
+async function startHttp() {
+  const { Hono } = await import("hono");
+  const { cors } = await import("hono/cors");
+  const { logger } = await import("hono/logger");
+  const { HttpTransport } = await import("./mcp/transport.js");
+  const { oauthRouter } = await import("./oauth/routes.js");
+  const { initTokenStore, cleanupExpired } = await import(
+    "./oauth/store.js"
+  );
+  const { rateLimit } = await import("./middleware/rate-limit.js");
+  const { auditLog } = await import("./middleware/audit.js");
 
   // Initialize token store
-  const dbPath = process.env.DB_PATH || "monarch-mcp.db";
-  initTokenStore(dbPath);
+  initTokenStore(config.dbPath);
 
   const app = new Hono();
 
@@ -74,7 +75,11 @@ function startHttp() {
 
   // ── Health check ──
   app.get("/health", (c) =>
-    c.json({ status: "ok", server: "monarch-money-mcp", version: "1.0.0" })
+    c.json({
+      status: "ok",
+      server: "monarch-money-mcp",
+      version: "0.1.0-alpha.1",
+    })
   );
 
   // ── OAuth routes ──
@@ -88,7 +93,7 @@ function startHttp() {
   }
   const sessions = new Map<string, McpSession>();
 
-  // Clean up stale sessions every 5 minutes
+  // Clean up stale sessions + expired tokens every 5 minutes
   setInterval(() => {
     const cutoff = Date.now() - 30 * 60_000;
     for (const [id, session] of sessions) {
@@ -97,6 +102,7 @@ function startHttp() {
         sessions.delete(id);
       }
     }
+    cleanupExpired();
   }, 5 * 60_000);
 
   app.post("/mcp", rateLimit({ rpm: config.rateLimit.rpm }), async (c) => {

@@ -98,11 +98,14 @@ import { z } from "zod";
 import { getMonarchClient } from "../monarch/client.js";
 
 export function registerMyTools(server: McpServer) {
-  server.tool(
+  server.registerTool(
     "tool_name",
-    "Clear description of what this tool does and when to use it.",
     {
-      param_name: z.string().optional().describe("What this parameter controls."),
+      description: "Clear description of what this tool does and when to use it.",
+      inputSchema: {
+        param_name: z.string().optional().describe("What this parameter controls."),
+      },
+      annotations: { readOnlyHint: true },
     },
     async ({ param_name }) => {
       try {
@@ -193,6 +196,8 @@ This project is configured for Fly.io deployment. Key files:
 
 - **`fly.toml`** — App config: `monarch-money-mcp`, region `sjc`, port 3200, persistent volume at `/data`
 - **`Dockerfile`** — `oven/bun:1` base, non-root user, production deps only
+
+**Live deployment:** https://monarch-money-mcp.fly.dev/
 
 ### Fly.io Commands
 
@@ -342,6 +347,11 @@ PKCE (S256) is enforced. Auth codes expire in 10 minutes. Access tokens expire i
 bun test                              # All tests
 bun test src/analysis/                # Analysis unit tests only
 HAS_REAL_CREDENTIALS=true bun test    # Include integration tests (needs real Monarch creds)
+```
+
+Test files live alongside source as `*.test.ts` files (e.g., `src/analysis/spending.test.ts`).
+
+```bash
 ```
 
 Analysis functions can be tested with mock data — no API mocking needed. Tool handlers require mocking `getMonarchClient()`.

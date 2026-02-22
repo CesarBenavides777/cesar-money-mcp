@@ -1,10 +1,12 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 export function registerPrompts(server: McpServer) {
-  server.prompt(
+  server.registerPrompt(
     "monthly-review",
-    "Comprehensive monthly financial review covering accounts, cash flow, spending, anomalies, and overall financial health",
-    {},
+    {
+      description:
+        "Comprehensive monthly financial review covering accounts, cash flow, spending, anomalies, and overall financial health",
+    },
     async () => ({
       messages: [
         {
@@ -18,10 +20,12 @@ export function registerPrompts(server: McpServer) {
     })
   );
 
-  server.prompt(
+  server.registerPrompt(
     "budget-check",
-    "Check current month budget adherence, identify over-budget categories, and project end-of-month outcomes",
-    {},
+    {
+      description:
+        "Check current month budget adherence, identify over-budget categories, and project end-of-month outcomes",
+    },
     async () => ({
       messages: [
         {
@@ -35,10 +39,12 @@ export function registerPrompts(server: McpServer) {
     })
   );
 
-  server.prompt(
+  server.registerPrompt(
     "spending-audit",
-    "Deep dive into spending patterns to uncover savings opportunities, lifestyle inflation, and spending habits",
-    {},
+    {
+      description:
+        "Deep dive into spending patterns to uncover savings opportunities, lifestyle inflation, and spending habits",
+    },
     async () => ({
       messages: [
         {
@@ -52,10 +58,12 @@ export function registerPrompts(server: McpServer) {
     })
   );
 
-  server.prompt(
+  server.registerPrompt(
     "net-worth-update",
-    "Track net worth changes, analyze asset and liability trends, and assess progress toward financial goals",
-    {},
+    {
+      description:
+        "Track net worth changes, analyze asset and liability trends, and assess progress toward financial goals",
+    },
     async () => ({
       messages: [
         {
@@ -69,10 +77,12 @@ export function registerPrompts(server: McpServer) {
     })
   );
 
-  server.prompt(
+  server.registerPrompt(
     "subscription-audit",
-    "Review all recurring payments and subscriptions to find forgotten services, price increases, and savings opportunities",
-    {},
+    {
+      description:
+        "Review all recurring payments and subscriptions to find forgotten services, price increases, and savings opportunities",
+    },
     async () => ({
       messages: [
         {

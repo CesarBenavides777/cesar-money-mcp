@@ -2,9 +2,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { getMonarchClient } from "../monarch/client.js";
 
 export function registerResources(server: McpServer) {
-  server.resource(
+  server.registerResource(
     "accounts",
     "finance://accounts",
+    { description: "All linked financial accounts with current balances" },
     async (uri) => {
       const client = await getMonarchClient();
       const accounts = await client.accounts.getAll();
@@ -20,27 +21,27 @@ export function registerResources(server: McpServer) {
     }
   );
 
-  server.resource(
+  server.registerResource(
     "net-worth",
     "finance://net-worth",
+    { description: "Net worth snapshot with asset/liability breakdown and history" },
     async (uri) => {
       const client = await getMonarchClient();
       const accounts = await client.accounts.getAll();
       const netWorthHistory = await client.accounts.getNetWorthHistory();
 
+      const liabilityTypes = new Set(["credit", "loan", "liability", "mortgage"]);
+
       const totalAssets = accounts
-        .filter(
-          (a: any) =>
-            a.type !== "credit" && a.type !== "loan" && a.type !== "liability"
-        )
+        .filter((a: any) => !liabilityTypes.has(a.type?.name ?? a.type))
         .reduce((sum: number, a: any) => sum + (a.currentBalance ?? 0), 0);
 
       const totalLiabilities = accounts
-        .filter(
-          (a: any) =>
-            a.type === "credit" || a.type === "loan" || a.type === "liability"
-        )
-        .reduce((sum: number, a: any) => sum + (a.currentBalance ?? 0), 0);
+        .filter((a: any) => liabilityTypes.has(a.type?.name ?? a.type))
+        .reduce(
+          (sum: number, a: any) => sum + Math.abs(a.currentBalance ?? 0),
+          0
+        );
 
       const snapshot = {
         totalAssets,
@@ -67,9 +68,10 @@ export function registerResources(server: McpServer) {
     }
   );
 
-  server.resource(
+  server.registerResource(
     "budget-current",
     "finance://budget/current",
+    { description: "Current month budget with planned vs actual amounts" },
     async (uri) => {
       const client = await getMonarchClient();
 
@@ -94,9 +96,10 @@ export function registerResources(server: McpServer) {
     }
   );
 
-  server.resource(
+  server.registerResource(
     "subscriptions",
     "finance://subscriptions",
+    { description: "All recurring payments and subscription data" },
     async (uri) => {
       const client = await getMonarchClient();
       const recurring = await client.recurring.getRecurringStreams();

@@ -75,12 +75,14 @@ import { z } from "zod";
 import { getMonarchClient } from "../monarch/client.js";
 
 export function registerMyFeatureTools(server: McpServer) {
-  server.tool(
+  server.registerTool(
     "my_tool_name",
-    "Description of what this tool does and when the AI should use it.",
     {
-      // Zod schema for parameters
-      someParam: z.string().optional().describe("What this parameter does."),
+      description: "Description of what this tool does and when the AI should use it.",
+      inputSchema: {
+        someParam: z.string().optional().describe("What this parameter does."),
+      },
+      annotations: { readOnlyHint: true },
     },
     async ({ someParam }) => {
       try {
@@ -120,7 +122,7 @@ Analysis functions should be pure (data in, result out) so they are easy to unit
 - Always use `getMonarchClient()` from `src/monarch/client.ts`
 - It is a singleton that handles login, session caching, and auto-revalidation
 - If the session expires, it automatically re-authenticates
-- The client is configured with 30s timeout, 3 retries, and a 5-minute response cache
+- The client is configured with 30s timeout, 3 retries, and a 5-minute memory cache for accounts, categories, transactions, and budgets
 - API sub-domains: `client.accounts`, `client.transactions`, `client.budgets`, `client.categories`, `client.institutions`, `client.insights`, `client.recurring`
 - Use `resetMonarchClient()` to force a fresh login (e.g., after credential changes)
 
@@ -198,10 +200,10 @@ server.prompt(
 
 ## Testing
 
-- `bun test` runs the test suite (unit tests in `tests/unit/`, integration in `tests/integration/`, e2e in `tests/e2e/`)
-- Analysis functions in `src/analysis/` are pure and can be tested by passing mock data directly
+- `bun test` runs the test suite
+- Test files live alongside source as `*.test.ts` files (e.g., `src/analysis/spending.test.ts`)
+- Analysis functions in `src/analysis/` are pure and can be tested by passing mock data directly — no API mocking needed
 - For integration tests that hit the real Monarch API, set `HAS_REAL_CREDENTIALS=true` and provide `MONARCH_EMAIL` / `MONARCH_PASSWORD` / `MONARCH_MFA_SECRET`
-- Test fixtures live in `tests/fixtures/`
 
 ## HTTP Endpoints (HTTP mode only)
 

@@ -3,10 +3,13 @@ import { z } from "zod";
 import { getMonarchClient } from "../monarch/client.js";
 
 export function registerInsightTools(server: McpServer) {
-  server.tool(
+  server.registerTool(
     "get_net_worth",
-    "Get the current net worth snapshot by fetching the most recent net worth data point. Returns total assets, total liabilities, and net worth as of today. Use this when the user asks 'what is my net worth?' or wants a quick financial health summary.",
-    {},
+    {
+      description:
+        "Get the current net worth snapshot by fetching the most recent net worth data point. Returns total assets, total liabilities, and net worth as of today. Use this when the user asks 'what is my net worth?' or wants a quick financial health summary.",
+      annotations: { readOnlyHint: true },
+    },
     async () => {
       try {
         const client = await getMonarchClient();
@@ -31,22 +34,26 @@ export function registerInsightTools(server: McpServer) {
     }
   );
 
-  server.tool(
+  server.registerTool(
     "get_net_worth_history",
-    "Get net worth history over a date range showing how total assets, liabilities, and net worth have changed over time. Returns a time series of data points useful for charting net worth growth, identifying trends, or measuring progress toward financial goals.",
     {
-      startDate: z
-        .string()
-        .optional()
-        .describe(
-          "Start date for the history range in YYYY-MM-DD format. Defaults to the earliest available data."
-        ),
-      endDate: z
-        .string()
-        .optional()
-        .describe(
-          "End date for the history range in YYYY-MM-DD format. Defaults to today."
-        ),
+      description:
+        "Get net worth history over a date range showing how total assets, liabilities, and net worth have changed over time. Returns a time series of data points useful for charting net worth growth, identifying trends, or measuring progress toward financial goals.",
+      inputSchema: {
+        startDate: z
+          .string()
+          .optional()
+          .describe(
+            "Start date for the history range in YYYY-MM-DD format. Defaults to the earliest available data."
+          ),
+        endDate: z
+          .string()
+          .optional()
+          .describe(
+            "End date for the history range in YYYY-MM-DD format. Defaults to today."
+          ),
+      },
+      annotations: { readOnlyHint: true },
     },
     async ({ startDate, endDate }) => {
       try {

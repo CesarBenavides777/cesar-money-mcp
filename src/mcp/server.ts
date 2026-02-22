@@ -12,7 +12,7 @@ import { registerResources } from "../tools/resources.js";
 import { registerPrompts } from "../tools/prompts.js";
 
 const SERVER_NAME = "monarch-money";
-const SERVER_VERSION = "1.0.0";
+const SERVER_VERSION = "0.1.0-alpha.1";
 
 /**
  * Create and configure a fully-loaded MCP server instance

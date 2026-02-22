@@ -3,16 +3,20 @@ import { z } from "zod";
 import { getMonarchClient } from "../monarch/client.js";
 
 export function registerAccountTools(server: McpServer) {
-  server.tool(
+  server.registerTool(
     "get_accounts",
-    "List all financial accounts linked to Monarch Money, including bank accounts, credit cards, investments, loans, and other assets. Returns account names, types, current balances, and institution details. Use this to get an overview of all connected accounts or find a specific account ID for further queries.",
     {
-      includeHidden: z
-        .boolean()
-        .optional()
-        .describe(
-          "Whether to include hidden/archived accounts in the results. Defaults to false."
-        ),
+      description:
+        "List all financial accounts linked to Monarch Money, including bank accounts, credit cards, investments, loans, and other assets. Returns account names, types, current balances, and institution details. Use this to get an overview of all connected accounts or find a specific account ID for further queries.",
+      inputSchema: {
+        includeHidden: z
+          .boolean()
+          .optional()
+          .describe(
+            "Whether to include hidden/archived accounts in the results. Defaults to false."
+          ),
+      },
+      annotations: { readOnlyHint: true },
     },
     async ({ includeHidden }) => {
       try {
@@ -36,27 +40,31 @@ export function registerAccountTools(server: McpServer) {
     }
   );
 
-  server.tool(
+  server.registerTool(
     "get_account_history",
-    "Get the balance history for a specific account over time. Returns a time series of balance snapshots useful for charting account growth, tracking debt payoff progress, or analyzing balance trends. Requires an account ID which can be obtained from get_accounts.",
     {
-      accountId: z
-        .string()
-        .describe(
-          "The unique identifier of the account to get history for. Obtain this from get_accounts."
-        ),
-      startDate: z
-        .string()
-        .optional()
-        .describe(
-          "Start date for the history range in YYYY-MM-DD format. Defaults to the earliest available data."
-        ),
-      endDate: z
-        .string()
-        .optional()
-        .describe(
-          "End date for the history range in YYYY-MM-DD format. Defaults to today."
-        ),
+      description:
+        "Get the balance history for a specific account over time. Returns a time series of balance snapshots useful for charting account growth, tracking debt payoff progress, or analyzing balance trends. Requires an account ID which can be obtained from get_accounts.",
+      inputSchema: {
+        accountId: z
+          .string()
+          .describe(
+            "The unique identifier of the account to get history for. Obtain this from get_accounts."
+          ),
+        startDate: z
+          .string()
+          .optional()
+          .describe(
+            "Start date for the history range in YYYY-MM-DD format. Defaults to the earliest available data."
+          ),
+        endDate: z
+          .string()
+          .optional()
+          .describe(
+            "End date for the history range in YYYY-MM-DD format. Defaults to today."
+          ),
+      },
+      annotations: { readOnlyHint: true },
     },
     async ({ accountId, startDate, endDate }) => {
       try {

@@ -2,10 +2,13 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { getMonarchClient } from "../monarch/client.js";
 
 export function registerCategoryTools(server: McpServer) {
-  server.tool(
+  server.registerTool(
     "get_categories",
-    "Get all transaction categories configured in Monarch Money. Returns category names, IDs, and types (income vs expense). Use this to look up category IDs for filtering transactions or budgets, or to understand the user's category taxonomy.",
-    {},
+    {
+      description:
+        "Get all transaction categories configured in Monarch Money. Returns category names, IDs, and types (income vs expense). Use this to look up category IDs for filtering transactions or budgets, or to understand the user's category taxonomy.",
+      annotations: { readOnlyHint: true },
+    },
     async () => {
       try {
         const client = await getMonarchClient();
@@ -26,10 +29,13 @@ export function registerCategoryTools(server: McpServer) {
     }
   );
 
-  server.tool(
+  server.registerTool(
     "get_category_groups",
-    "Get all category groups which organize individual categories into higher-level groupings (e.g., 'Food & Drink' containing 'Groceries' and 'Restaurants'). Use this to understand the hierarchical structure of categories or to aggregate spending at a group level.",
-    {},
+    {
+      description:
+        "Get all category groups which organize individual categories into higher-level groupings (e.g., 'Food & Drink' containing 'Groceries' and 'Restaurants'). Use this to understand the hierarchical structure of categories or to aggregate spending at a group level.",
+      annotations: { readOnlyHint: true },
+    },
     async () => {
       try {
         const client = await getMonarchClient();

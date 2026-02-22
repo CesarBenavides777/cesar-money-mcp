@@ -38,10 +38,10 @@ let db: Database | null = null;
 
 export function initTokenStore(dbPath = "monarch-mcp.db") {
   db = new Database(dbPath);
-  db.exec("PRAGMA journal_mode=WAL");
-  db.exec("PRAGMA busy_timeout=5000");
+  db.run("PRAGMA journal_mode=WAL");
+  db.run("PRAGMA busy_timeout=5000");
 
-  db.exec(`
+  db.run(`
     CREATE TABLE IF NOT EXISTS auth_codes (
       code TEXT PRIMARY KEY,
       client_id TEXT NOT NULL,
@@ -53,7 +53,7 @@ export function initTokenStore(dbPath = "monarch-mcp.db") {
     )
   `);
 
-  db.exec(`
+  db.run(`
     CREATE TABLE IF NOT EXISTS tokens (
       token TEXT PRIMARY KEY,
       type TEXT NOT NULL CHECK(type IN ('access', 'refresh')),
@@ -63,7 +63,7 @@ export function initTokenStore(dbPath = "monarch-mcp.db") {
     )
   `);
 
-  db.exec(`
+  db.run(`
     CREATE TABLE IF NOT EXISTS clients (
       client_id TEXT PRIMARY KEY,
       client_name TEXT,

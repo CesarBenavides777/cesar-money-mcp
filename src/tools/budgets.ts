@@ -3,22 +3,26 @@ import { z } from "zod";
 import { getMonarchClient } from "../monarch/client.js";
 
 export function registerBudgetTools(server: McpServer) {
-  server.tool(
+  server.registerTool(
     "get_budgets",
-    "Retrieve budget data for a given time period, including budget categories, planned amounts, actual spending, and remaining balances. Use this to check how spending compares to budgeted amounts, identify categories that are over or under budget, or get a complete picture of the user's budgeting setup.",
     {
-      startDate: z
-        .string()
-        .optional()
-        .describe(
-          "Start date for the budget period in YYYY-MM-DD format. Typically the first day of a month. Defaults to the current month start."
-        ),
-      endDate: z
-        .string()
-        .optional()
-        .describe(
-          "End date for the budget period in YYYY-MM-DD format. Typically the last day of a month. Defaults to the current month end."
-        ),
+      description:
+        "Retrieve budget data for a given time period, including budget categories, planned amounts, actual spending, and remaining balances. Use this to check how spending compares to budgeted amounts, identify categories that are over or under budget, or get a complete picture of the user's budgeting setup.",
+      inputSchema: {
+        startDate: z
+          .string()
+          .optional()
+          .describe(
+            "Start date for the budget period in YYYY-MM-DD format. Typically the first day of a month. Defaults to the current month start."
+          ),
+        endDate: z
+          .string()
+          .optional()
+          .describe(
+            "End date for the budget period in YYYY-MM-DD format. Typically the last day of a month. Defaults to the current month end."
+          ),
+      },
+      annotations: { readOnlyHint: true },
     },
     async ({ startDate, endDate }) => {
       try {
