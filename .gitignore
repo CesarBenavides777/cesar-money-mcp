@@ -1,19 +1,42 @@
-# Python-generated files
+# Legacy archive
+_archive/
+
+# Python (legacy)
 __pycache__/
 *.py[oc]
+*.egg-info
+.venv
+
+# Build output
 build/
 dist/
 wheels/
-*.egg-info
 
-# Virtual environments
-.venv
+# Dependencies
+node_modules/
+
+# Environment & secrets
 .env
 .env.vercel
+.env.local
+
+# Data
+*.db
+*.db-wal
+*.db-shm
+
+# IDE / editor
 .specstory/
 .mm/
-reference.py
 .cursorindexingignore
+.vscode/
+.idea/
 
-# Vercel
+# Deployment
 .vercel
+
+# OS
+.DS_Store
+
+# Misc
+reference.py

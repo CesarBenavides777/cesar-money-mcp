@@ -1,0 +1,30 @@
+app = "monarch-money-mcp"
+primary_region = "sjc"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  TRANSPORT = "http"
+  PORT = "3200"
+  NODE_ENV = "production"
+
+[http_service]
+  internal_port = 3200
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 25
+    soft_limit = 20
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
+
+[mounts]
+  source = "mcp_data"
+  destination = "/data"
